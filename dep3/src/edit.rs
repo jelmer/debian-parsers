@@ -3,7 +3,7 @@
 //! # Examples
 //!
 //! ```rust
-//! use dep3::lossless::PatchHeader;
+//! use dep3::edit::PatchHeader;
 //! use std::str::FromStr;
 //! let text = r#"From: John Doe <john.doe@example>
 //! Date: Mon, 1 Jan 2000 00:00:00 +0000

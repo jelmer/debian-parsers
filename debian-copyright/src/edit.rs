@@ -7,7 +7,7 @@
 //!
 //! ```rust
 //!
-//! use debian_copyright::lossless::Copyright;
+//! use debian_copyright::edit::Copyright;
 //! use std::path::Path;
 //!
 //! let text = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
