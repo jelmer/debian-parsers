@@ -20,8 +20,15 @@
 //! ```
 mod fields;
 pub use fields::*;
+#[cfg(feature = "edit")]
+pub mod edit;
+
 #[cfg(feature = "lossless")]
-pub mod lossless;
+#[deprecated(since = "0.1.29", note = "Use `edit` module instead")]
+pub mod lossless {
+    //! Deprecated: Use the `edit` module instead.
+    pub use crate::edit::*;
+}
 pub mod lossy;
 
 pub use lossy::PatchHeader;

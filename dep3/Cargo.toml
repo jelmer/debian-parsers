@@ -16,8 +16,9 @@ deb822-fast = { path = "../deb822-fast", version = ">=0.1, <0.3", features = ["d
 url = ">=2, <3"
 
 [features]
-default = ["lossless"]
-lossless = ["dep:deb822-edit"]
+default = ["edit"]
+edit = ["dep:deb822-edit"]
+lossless = ["edit"]  # Deprecated: use 'edit' feature instead
 
 [badges]
 maintenance = { status = "actively-maintained" }

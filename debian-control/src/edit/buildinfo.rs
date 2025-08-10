@@ -4,8 +4,8 @@
 //! information about the build environment of a package. See <https://wiki.debian.org/Buildinfo> for
 //! more information.
 
+use crate::edit::relations::Relations;
 use crate::fields::{Md5Checksum, Sha1Checksum, Sha256Checksum};
-use crate::lossless::relations::Relations;
 use rowan::ast::AstNode;
 
 /// A buildinfo file

@@ -1,8 +1,8 @@
 //! APT package manager files
+use crate::edit::relations::Relations;
 use crate::fields::{
     Md5Checksum, MultiArch, Priority, Sha1Checksum, Sha256Checksum, Sha512Checksum,
 };
-use crate::lossless::relations::Relations;
 use rowan::ast::AstNode;
 
 /// A source package in the APT package manager.
