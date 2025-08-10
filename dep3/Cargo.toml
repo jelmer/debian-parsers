@@ -17,8 +17,9 @@ patchkit = { version = ">=0.3, <0.4", optional = true }
 url = ">=2, <3"
 
 [features]
-default = ["lossless"]
-lossless = ["dep:deb822-edit"]
+default = ["edit"]
+edit = ["dep:deb822-edit"]
+lossless = ["edit"]  # Deprecated: use 'edit' feature instead
 patchkit = ["dep:patchkit"]
 
 [badges]

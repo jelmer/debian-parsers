@@ -1,5 +1,5 @@
+use debian_control::edit::Control;
 use debian_control::fields::Priority;
-use debian_control::lossless::Control;
 
 pub fn main() {
     let mut control = Control::new();

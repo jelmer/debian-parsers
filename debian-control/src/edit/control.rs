@@ -2,7 +2,7 @@
 //!
 //! # Example
 //! ```rust
-//! use debian_control::lossless::Control;
+//! use debian_control::edit::Control;
 //! use debian_control::relations::VersionConstraint;
 //! let input = r###"Source: dulwich
 //! ## Comments are preserved
@@ -32,8 +32,8 @@
 //! Build-Depends: python3, debhelper-compat (= 12)
 //! "###);
 //! ```
+use crate::edit::relations::Relations;
 use crate::fields::{MultiArch, Priority};
-use crate::lossless::relations::Relations;
 use deb822_edit::{Deb822, Paragraph, TextRange};
 use rowan::ast::AstNode;
 
@@ -357,7 +357,7 @@ impl Control {
     ///
     /// # Example
     /// ```rust
-    /// use debian_control::lossless::control::Control;
+    /// use debian_control::edit::control::Control;
     /// let mut control = Control::new();
     /// let source = control.add_source("foo");
     /// assert_eq!(source.name(), Some("foo".to_owned()));
@@ -378,7 +378,7 @@ impl Control {
     ///
     /// # Example
     /// ```rust
-    /// use debian_control::lossless::control::Control;
+    /// use debian_control::edit::control::Control;
     /// let mut control = Control::new();
     /// let binary = control.add_binary("foo");
     /// assert_eq!(binary.name(), Some("foo".to_owned()));
@@ -402,7 +402,7 @@ impl Control {
     ///
     /// # Example
     /// ```rust
-    /// use debian_control::lossless::control::Control;
+    /// use debian_control::edit::control::Control;
     /// let mut control = Control::new();
     /// control.add_binary("foo");
     /// assert_eq!(control.binaries().count(), 1);
@@ -526,7 +526,7 @@ impl Control {
     ///
     /// # Example
     /// ```rust
-    /// use debian_control::lossless::Control;
+    /// use debian_control::edit::Control;
     ///
     /// let input = r#"Source: foo
     ///
@@ -598,7 +598,7 @@ impl Control {
     ///
     /// # Example
     /// ```rust
-    /// use debian_control::lossless::Control;
+    /// use debian_control::edit::Control;
     /// use deb822_edit::TextRange;
     ///
     /// let control_text = "Source: foo\nMaintainer: test@example.com\n\nPackage: bar\nArchitecture: all\n";
