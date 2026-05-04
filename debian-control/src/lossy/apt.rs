@@ -106,6 +106,27 @@ fn deserialize_package_list(value: &str) -> Result<Vec<String>, String> {
     Ok(value.split('\n').map(|s| s.to_string()).collect())
 }
 
+fn deserialize_checksums<T>(value: &str) -> Result<Vec<T>, String>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    value
+        .lines()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse::<T>().map_err(|e| e.to_string()))
+        .collect()
+}
+
+fn serialize_checksums<T: std::fmt::Display>(checksums: &[T]) -> String {
+    checksums
+        .iter()
+        .map(|c| format!(" {}", c))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, ToDeb822, FromDeb822)]
 /// A source
 pub struct Source {
@@ -229,9 +250,29 @@ pub struct Source {
     /// Format of the source
     pub format: Option<String>,
 
+    #[deb822(field = "Architecture")]
+    /// Architectures the source builds for
+    pub architecture: Option<String>,
+
     #[deb822(field = "Package-List", deserialize_with = deserialize_package_list, serialize_with = join_lines)]
     /// Package list of the source
     pub package_list: Vec<String>,
+
+    #[deb822(field = "Files", deserialize_with = deserialize_checksums::<crate::fields::Md5Checksum>, serialize_with = serialize_checksums::<crate::fields::Md5Checksum>)]
+    /// MD5 checksums of source files
+    pub files: Option<Vec<crate::fields::Md5Checksum>>,
+
+    #[deb822(field = "Checksums-Sha1", deserialize_with = deserialize_checksums::<crate::fields::Sha1Checksum>, serialize_with = serialize_checksums::<crate::fields::Sha1Checksum>)]
+    /// SHA-1 checksums of source files
+    pub checksums_sha1: Option<Vec<crate::fields::Sha1Checksum>>,
+
+    #[deb822(field = "Checksums-Sha256", deserialize_with = deserialize_checksums::<crate::fields::Sha256Checksum>, serialize_with = serialize_checksums::<crate::fields::Sha256Checksum>)]
+    /// SHA-256 checksums of source files
+    pub checksums_sha256: Option<Vec<crate::fields::Sha256Checksum>>,
+
+    #[deb822(field = "Checksums-Sha512", deserialize_with = deserialize_checksums::<crate::fields::Sha512Checksum>, serialize_with = serialize_checksums::<crate::fields::Sha512Checksum>)]
+    /// SHA-512 checksums of source files
+    pub checksums_sha512: Option<Vec<crate::fields::Sha512Checksum>>,
 }
 
 impl std::str::FromStr for Source {
@@ -631,5 +672,33 @@ Package-List:
         assert_eq!(dgit.suite, "debian");
         assert_eq!(dgit.git_ref, "archive/debian/1.1.0");
         assert_eq!(dgit.url, "https://git.dgit.debian.org/test-pkg");
+    }
+
+    #[test]
+    fn test_source_checksums() {
+        let source = r#"Package: hello
+Version: 1.0-1
+Directory: pool/main/h/hello
+Package-List: 
+ hello deb misc optional arch=any
+Files:
+ acbd18db4cc2f85cedef654fccc4a4d8 1234 hello_1.0.orig.tar.gz
+Checksums-Sha256:
+ 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824 1234 hello_1.0.orig.tar.gz
+"#;
+
+        let source: Source = source.parse().unwrap();
+        assert_eq!(source.package, "hello");
+        let files = source.files.as_ref().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].md5sum, "acbd18db4cc2f85cedef654fccc4a4d8");
+        assert_eq!(files[0].size, 1234);
+        assert_eq!(files[0].filename, "hello_1.0.orig.tar.gz");
+        let sha256 = source.checksums_sha256.as_ref().unwrap();
+        assert_eq!(sha256.len(), 1);
+        assert_eq!(
+            sha256[0].sha256,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
     }
 }
