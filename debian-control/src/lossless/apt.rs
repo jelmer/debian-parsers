@@ -9,6 +9,11 @@ use rowan::ast::AstNode;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source(deb822_lossless::Paragraph);
 
+// SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
+// Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
+unsafe impl Send for Source {}
+unsafe impl Sync for Source {}
+
 #[cfg(feature = "python-debian")]
 impl<'py> pyo3::IntoPyObject<'py> for Source {
     type Target = pyo3::PyAny;
@@ -532,9 +537,20 @@ impl AstNode for Source {
     }
 }
 
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A package in the APT package manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package(deb822_lossless::Paragraph);
+
+// SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
+// Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
+unsafe impl Send for Package {}
+unsafe impl Sync for Package {}
 
 #[cfg(feature = "python-debian")]
 impl<'py> pyo3::IntoPyObject<'py> for Package {
@@ -867,6 +883,16 @@ impl Package {
         self.0.set("MD5sum", md5sum);
     }
 
+    /// Get the SHA1 checksum.
+    pub fn sha1(&self) -> Option<String> {
+        self.0.get("SHA1").map(|s| s.to_string())
+    }
+
+    /// Set the SHA1 checksum.
+    pub fn set_sha1(&mut self, sha1: &str) {
+        self.0.set("SHA1", sha1);
+    }
+
     /// Get the SHA256 checksum.
     pub fn sha256(&self) -> Option<String> {
         self.0.get("SHA256").map(|s| s.to_string())
@@ -877,6 +903,16 @@ impl Package {
         self.0.set("SHA256", sha256);
     }
 
+    /// Get the SHA512 checksum.
+    pub fn sha512(&self) -> Option<String> {
+        self.0.get("SHA512").map(|s| s.to_string())
+    }
+
+    /// Set the SHA512 checksum.
+    pub fn set_sha512(&mut self, sha512: &str) {
+        self.0.set("SHA512", sha512);
+    }
+
     /// Get the multi-arch field.
     pub fn multi_arch(&self) -> Option<MultiArch> {
         self.0.get("Multi-Arch").map(|s| s.parse().unwrap())
@@ -885,6 +921,18 @@ impl Package {
     /// Set the multi-arch field.
     pub fn set_multi_arch(&mut self, arch: MultiArch) {
         self.0.set("Multi-Arch", arch.to_string().as_str());
+    }
+}
+
+impl Default for Package {
+    fn default() -> Self {
+        Self(deb822_lossless::Paragraph::new())
+    }
+}
+
+impl std::fmt::Display for Package {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -919,7 +967,13 @@ impl AstNode for Package {
 }
 
 /// A release in the APT package manager.
+#[derive(Clone)]
 pub struct Release(deb822_lossless::Paragraph);
+
+// SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
+// Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
+unsafe impl Send for Release {}
+unsafe impl Sync for Release {}
 
 #[cfg(feature = "python-debian")]
 impl<'py> pyo3::IntoPyObject<'py> for Release {
@@ -1244,6 +1298,53 @@ impl Release {
                 .collect::<Vec<String>>()
                 .join("\n"),
         );
+    }
+
+    /// Get whether the release is not automatic.
+    pub fn not_automatic(&self) -> Option<bool> {
+        self.0
+            .get("NotAutomatic")
+            .map(|s| s.to_lowercase() == "yes")
+    }
+
+    /// Set whether the release is not automatic.
+    pub fn set_not_automatic(&mut self, v: bool) {
+        self.0.set("NotAutomatic", if v { "yes" } else { "no" });
+    }
+
+    /// Get whether automatic upgrades are allowed despite not automatic.
+    pub fn but_automatic_upgrades(&self) -> Option<bool> {
+        self.0
+            .get("ButAutomaticUpgrades")
+            .map(|s| s.to_lowercase() == "yes")
+    }
+
+    /// Set whether automatic upgrades are allowed despite not automatic.
+    pub fn set_but_automatic_upgrades(&mut self, v: bool) {
+        self.0
+            .set("ButAutomaticUpgrades", if v { "yes" } else { "no" });
+    }
+
+    /// Get the version of the release.
+    pub fn version(&self) -> Option<String> {
+        self.0.get("Version").map(|s| s.to_string())
+    }
+
+    /// Set the version of the release.
+    pub fn set_version(&mut self, version: &str) {
+        self.0.set("Version", version);
+    }
+}
+
+impl Default for Release {
+    fn default() -> Self {
+        Self(deb822_lossless::Paragraph::new())
+    }
+}
+
+impl std::fmt::Display for Release {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
