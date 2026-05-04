@@ -35,7 +35,7 @@ fn deserialize_architectures(value: &str) -> Result<Vec<String>, String> {
 pub struct Release {
     #[deb822(field = "Codename")]
     /// The codename of the release
-    pub codename: String,
+    pub codename: Option<String>,
 
     #[deb822(
         field = "Components",
@@ -55,39 +55,73 @@ pub struct Release {
 
     #[deb822(field = "Description")]
     /// Description of the release
-    pub description: String,
+    pub description: Option<String>,
 
     #[deb822(field = "Origin")]
     /// Origin of the release
-    pub origin: String,
+    pub origin: Option<String>,
 
     #[deb822(field = "Label")]
     /// Label of the release
-    pub label: String,
+    pub label: Option<String>,
 
     #[deb822(field = "Suite")]
     /// Suite of the release
-    pub suite: String,
+    pub suite: Option<String>,
 
     #[deb822(field = "Version")]
     /// Version of the release
-    pub version: String,
+    pub version: Option<String>,
 
     #[deb822(field = "Date")]
     /// Date the release was published
-    pub date: String,
+    pub date: Option<String>,
 
     #[deb822(field = "NotAutomatic", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     /// Whether the release is not automatic
-    pub not_automatic: bool,
+    pub not_automatic: Option<bool>,
 
     #[deb822(field = "ButAutomaticUpgrades", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     /// Indicates if packages retrieved from this release should be automatically upgraded
-    pub but_automatic_upgrades: bool,
+    pub but_automatic_upgrades: Option<bool>,
 
     #[deb822(field = "Acquire-By-Hash", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     /// Whether packages files can be acquired by hash
-    pub acquire_by_hash: bool,
+    pub acquire_by_hash: Option<bool>,
+
+    #[deb822(field = "MD5Sum", deserialize_with = deserialize_checksums::<crate::fields::Md5Checksum>, serialize_with = serialize_checksums::<crate::fields::Md5Checksum>)]
+    /// MD5 checksums of repository index files
+    pub checksums_md5: Option<Vec<crate::fields::Md5Checksum>>,
+
+    #[deb822(field = "SHA1", deserialize_with = deserialize_checksums::<crate::fields::Sha1Checksum>, serialize_with = serialize_checksums::<crate::fields::Sha1Checksum>)]
+    /// SHA-1 checksums of repository index files
+    pub checksums_sha1: Option<Vec<crate::fields::Sha1Checksum>>,
+
+    #[deb822(field = "SHA256", deserialize_with = deserialize_checksums::<crate::fields::Sha256Checksum>, serialize_with = serialize_checksums::<crate::fields::Sha256Checksum>)]
+    /// SHA-256 checksums of repository index files
+    pub checksums_sha256: Option<Vec<crate::fields::Sha256Checksum>>,
+
+    #[deb822(field = "SHA512", deserialize_with = deserialize_checksums::<crate::fields::Sha512Checksum>, serialize_with = serialize_checksums::<crate::fields::Sha512Checksum>)]
+    /// SHA-512 checksums of repository index files
+    pub checksums_sha512: Option<Vec<crate::fields::Sha512Checksum>>,
+}
+
+impl std::str::FromStr for Release {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let para = s
+            .parse::<deb822_fast::Paragraph>()
+            .map_err(|e| e.to_string())?;
+        FromDeb822Paragraph::from_paragraph(&para)
+    }
+}
+
+impl std::fmt::Display for Release {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let para: deb822_fast::Paragraph = self.to_paragraph();
+        write!(f, "{}", para)
+    }
 }
 
 fn deserialize_binaries(value: &str) -> Result<Vec<String>, String> {
@@ -446,18 +480,22 @@ mod tests {
     #[test]
     fn test_release() {
         let release = Release {
-            codename: "focal".to_string(),
+            codename: Some("focal".to_string()),
             components: vec!["main".to_string(), "restricted".to_string()],
             architectures: vec!["amd64".to_string(), "arm64".to_string()],
-            description: "Ubuntu 20.04 LTS".to_string(),
-            origin: "Ubuntu".to_string(),
-            label: "Ubuntu".to_string(),
-            suite: "focal".to_string(),
-            version: "20.04".to_string(),
-            date: "Thu, 23 Apr 2020 17:19:19 UTC".to_string(),
-            not_automatic: false,
-            but_automatic_upgrades: true,
-            acquire_by_hash: true,
+            description: Some("Ubuntu 20.04 LTS".to_string()),
+            origin: Some("Ubuntu".to_string()),
+            label: Some("Ubuntu".to_string()),
+            suite: Some("focal".to_string()),
+            version: Some("20.04".to_string()),
+            date: Some("Thu, 23 Apr 2020 17:19:19 UTC".to_string()),
+            not_automatic: Some(false),
+            but_automatic_upgrades: Some(true),
+            acquire_by_hash: Some(true),
+            checksums_md5: None,
+            checksums_sha1: None,
+            checksums_sha256: None,
+            checksums_sha512: None,
         };
 
         let deb822 = r#"Codename: focal
@@ -700,5 +738,28 @@ Checksums-Sha256:
             sha256[0].sha256,
             "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
+    }
+
+    #[test]
+    fn test_release_checksums() {
+        let release_str = r#"Suite: stable
+Codename: stable
+Architectures: amd64
+Components: main
+MD5Sum:
+ acbd18db4cc2f85cedef654fccc4a4d8 1234 main/binary-amd64/Packages
+SHA256:
+ 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824 1234 main/binary-amd64/Packages
+"#;
+
+        let release: Release = release_str.parse().unwrap();
+        assert_eq!(release.suite, Some("stable".to_string()));
+        let md5 = release.checksums_md5.as_ref().unwrap();
+        assert_eq!(md5.len(), 1);
+        assert_eq!(md5[0].filename, "main/binary-amd64/Packages");
+        assert_eq!(md5[0].size, 1234);
+        let sha256 = release.checksums_sha256.as_ref().unwrap();
+        assert_eq!(sha256.len(), 1);
+        assert_eq!(sha256[0].filename, "main/binary-amd64/Packages");
     }
 }
