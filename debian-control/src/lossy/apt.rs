@@ -352,13 +352,25 @@ pub struct Package {
     #[deb822(field = "Size")]
     pub size: Option<usize>,
 
+    /// Filename (path within the repository)
+    #[deb822(field = "Filename")]
+    pub filename: Option<String>,
+
     /// MD5sum
     #[deb822(field = "MD5sum")]
     pub md5sum: Option<String>,
 
+    /// SHA1
+    #[deb822(field = "SHA1")]
+    pub sha1: Option<String>,
+
     /// SHA256
     #[deb822(field = "SHA256")]
     pub sha256: Option<String>,
+
+    /// SHA512
+    #[deb822(field = "SHA512")]
+    pub sha512: Option<String>,
 
     /// Description (MD5)
     #[deb822(field = "Description-MD5")]
