@@ -867,6 +867,16 @@ impl Package {
         self.0.set("MD5sum", md5sum);
     }
 
+    /// Get the SHA1 checksum.
+    pub fn sha1(&self) -> Option<String> {
+        self.0.get("SHA1").map(|s| s.to_string())
+    }
+
+    /// Set the SHA1 checksum.
+    pub fn set_sha1(&mut self, sha1: &str) {
+        self.0.set("SHA1", sha1);
+    }
+
     /// Get the SHA256 checksum.
     pub fn sha256(&self) -> Option<String> {
         self.0.get("SHA256").map(|s| s.to_string())
@@ -877,6 +887,16 @@ impl Package {
         self.0.set("SHA256", sha256);
     }
 
+    /// Get the SHA512 checksum.
+    pub fn sha512(&self) -> Option<String> {
+        self.0.get("SHA512").map(|s| s.to_string())
+    }
+
+    /// Set the SHA512 checksum.
+    pub fn set_sha512(&mut self, sha512: &str) {
+        self.0.set("SHA512", sha512);
+    }
+
     /// Get the multi-arch field.
     pub fn multi_arch(&self) -> Option<MultiArch> {
         self.0.get("Multi-Arch").map(|s| s.parse().unwrap())
@@ -885,6 +905,18 @@ impl Package {
     /// Set the multi-arch field.
     pub fn set_multi_arch(&mut self, arch: MultiArch) {
         self.0.set("Multi-Arch", arch.to_string().as_str());
+    }
+}
+
+impl Default for Package {
+    fn default() -> Self {
+        Self(deb822_lossless::Paragraph::new())
+    }
+}
+
+impl std::fmt::Display for Package {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
