@@ -532,6 +532,12 @@ impl AstNode for Source {
     }
 }
 
+impl std::fmt::Display for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A package in the APT package manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package(deb822_lossless::Paragraph);
