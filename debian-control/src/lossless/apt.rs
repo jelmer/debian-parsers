@@ -919,6 +919,7 @@ impl AstNode for Package {
 }
 
 /// A release in the APT package manager.
+#[derive(Clone)]
 pub struct Release(deb822_lossless::Paragraph);
 
 #[cfg(feature = "python-debian")]
@@ -1244,6 +1245,53 @@ impl Release {
                 .collect::<Vec<String>>()
                 .join("\n"),
         );
+    }
+
+    /// Get whether the release is not automatic.
+    pub fn not_automatic(&self) -> Option<bool> {
+        self.0
+            .get("NotAutomatic")
+            .map(|s| s.to_lowercase() == "yes")
+    }
+
+    /// Set whether the release is not automatic.
+    pub fn set_not_automatic(&mut self, v: bool) {
+        self.0.set("NotAutomatic", if v { "yes" } else { "no" });
+    }
+
+    /// Get whether automatic upgrades are allowed despite not automatic.
+    pub fn but_automatic_upgrades(&self) -> Option<bool> {
+        self.0
+            .get("ButAutomaticUpgrades")
+            .map(|s| s.to_lowercase() == "yes")
+    }
+
+    /// Set whether automatic upgrades are allowed despite not automatic.
+    pub fn set_but_automatic_upgrades(&mut self, v: bool) {
+        self.0
+            .set("ButAutomaticUpgrades", if v { "yes" } else { "no" });
+    }
+
+    /// Get the version of the release.
+    pub fn version(&self) -> Option<String> {
+        self.0.get("Version").map(|s| s.to_string())
+    }
+
+    /// Set the version of the release.
+    pub fn set_version(&mut self, version: &str) {
+        self.0.set("Version", version);
+    }
+}
+
+impl Default for Release {
+    fn default() -> Self {
+        Self(deb822_lossless::Paragraph::new())
+    }
+}
+
+impl std::fmt::Display for Release {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
