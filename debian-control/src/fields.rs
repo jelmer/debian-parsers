@@ -242,13 +242,20 @@ impl std::fmt::Display for Md5Checksum {
 }
 
 impl std::str::FromStr for Md5Checksum {
-    type Err = ();
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut parts = s.split_whitespace();
-        let md5sum = parts.next().ok_or(())?;
-        let size = parts.next().ok_or(())?.parse().map_err(|_| ())?;
-        let filename = parts.next().ok_or(())?.to_string();
+        let md5sum = parts.next().ok_or_else(|| "Missing md5sum".to_string())?;
+        let size = parts
+            .next()
+            .ok_or_else(|| "Missing size".to_string())?
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let filename = parts
+            .next()
+            .ok_or_else(|| "Missing filename".to_string())?
+            .to_string();
         Ok(Self {
             md5sum: md5sum.to_string(),
             size,
