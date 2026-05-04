@@ -9,6 +9,11 @@ use rowan::ast::AstNode;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Source(deb822_lossless::Paragraph);
 
+// SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
+// Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
+unsafe impl Send for Source {}
+unsafe impl Sync for Source {}
+
 #[cfg(feature = "python-debian")]
 impl<'py> pyo3::IntoPyObject<'py> for Source {
     type Target = pyo3::PyAny;
@@ -542,6 +547,11 @@ impl std::fmt::Display for Source {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Package(deb822_lossless::Paragraph);
 
+// SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
+// Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
+unsafe impl Send for Package {}
+unsafe impl Sync for Package {}
+
 #[cfg(feature = "python-debian")]
 impl<'py> pyo3::IntoPyObject<'py> for Package {
     type Target = pyo3::PyAny;
@@ -959,6 +969,11 @@ impl AstNode for Package {
 /// A release in the APT package manager.
 #[derive(Clone)]
 pub struct Release(deb822_lossless::Paragraph);
+
+// SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
+// Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
+unsafe impl Send for Release {}
+unsafe impl Sync for Release {}
 
 #[cfg(feature = "python-debian")]
 impl<'py> pyo3::IntoPyObject<'py> for Release {
