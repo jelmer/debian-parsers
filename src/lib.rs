@@ -679,6 +679,73 @@ where
     }
 }
 
+/// Rebuild `overrides` with each line's TAG token rewritten by `rename`.
+///
+/// Lines whose tag is unchanged keep their original tokens (whitespace,
+/// comments, package spec) verbatim — only the TAG token is replaced.
+/// `rename` is invoked once per override line that has a tag, and should
+/// return the new tag text, or `None` to leave the tag as-is.
+///
+/// # Example
+/// ```
+/// use lintian_overrides::{LintianOverrides, rename_tags};
+/// let parsed = LintianOverrides::parse("# keep\nold-tag info\n");
+/// let overrides = parsed.ok().unwrap();
+/// let renamed = rename_tags(&overrides, |tag| {
+///     if tag == "old-tag" { Some("new-tag".to_string()) } else { None }
+/// });
+/// assert_eq!(renamed.text(), "# keep\nnew-tag info\n");
+/// ```
+pub fn rename_tags<F>(overrides: &LintianOverrides, mut rename: F) -> LintianOverrides
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let mut builder = GreenNodeBuilder::new();
+    builder.start_node(ROOT.into());
+
+    for child in overrides.syntax.children_with_tokens() {
+        match child {
+            rowan::NodeOrToken::Node(node) if node.kind() == OVERRIDE_LINE => {
+                let line = OverrideLine {
+                    syntax: node.clone(),
+                };
+                let new_tag = line.tag().and_then(|t| rename(t.text()));
+                if let Some(new_tag) = new_tag {
+                    builder.start_node(OVERRIDE_LINE.into());
+                    for element in line.syntax.children_with_tokens() {
+                        match element {
+                            rowan::NodeOrToken::Token(token) if token.kind() == TAG => {
+                                builder.token(TAG.into(), &new_tag);
+                            }
+                            rowan::NodeOrToken::Token(token) => {
+                                builder.token(token.kind().into(), token.text());
+                            }
+                            rowan::NodeOrToken::Node(child_node) => {
+                                copy_node(&mut builder, &child_node);
+                            }
+                        }
+                    }
+                    builder.finish_node();
+                } else {
+                    copy_node(&mut builder, &node);
+                }
+            }
+            rowan::NodeOrToken::Node(node) => {
+                copy_node(&mut builder, &node);
+            }
+            rowan::NodeOrToken::Token(token) => {
+                builder.token(token.kind().into(), token.text());
+            }
+        }
+    }
+
+    builder.finish_node();
+    let green = builder.finish();
+    LintianOverrides {
+        syntax: SyntaxNode::new_root(green),
+    }
+}
+
 /// Map override lines using a transformation function
 /// Returns a new LintianOverrides with the lines transformed by the function
 /// If the function returns None, the original line is kept unchanged
@@ -999,6 +1066,30 @@ mod tests {
             result, expected,
             "Newlines should be preserved after filtering"
         );
+    }
+
+    #[test]
+    fn test_rename_tags_preserves_structure() {
+        let text = "# keep this comment\npkg source: old-tag some info\nother-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.ok().unwrap();
+        let renamed = rename_tags(&overrides, |tag| match tag {
+            "old-tag" => Some("new-tag".to_string()),
+            _ => None,
+        });
+        assert_eq!(
+            renamed.text(),
+            "# keep this comment\npkg source: new-tag some info\nother-tag\n"
+        );
+    }
+
+    #[test]
+    fn test_rename_tags_no_match_no_change() {
+        let text = "tag1\ntag2\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.ok().unwrap();
+        let renamed = rename_tags(&overrides, |_| None);
+        assert_eq!(renamed.text(), text);
     }
 
     #[test]
