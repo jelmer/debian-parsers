@@ -551,6 +551,20 @@ impl Header {
         self.0.get("Upstream-Name")
     }
 
+    /// Set an arbitrary field on the header, honouring the canonical
+    /// DEP-5 field order so the new field lands in the right position.
+    ///
+    /// Use this when the typed setters (`set_upstream_name`,
+    /// `set_source`, …) don't cover the field you need.
+    pub fn set_field(&mut self, name: &str, value: &str) {
+        self.0.set_with_field_order(name, value, HEADER_FIELD_ORDER);
+    }
+
+    /// Remove a field from the header. A no-op if the field isn't set.
+    pub fn remove_field(&mut self, name: &str) {
+        self.0.remove(name);
+    }
+
     /// Set the upstream name
     pub fn set_upstream_name(&mut self, name: &str) {
         self.0
@@ -693,6 +707,17 @@ impl FilesParagraph {
     /// Return the underlying Deb822 paragraph
     pub fn as_deb822(&self) -> &Paragraph {
         &self.0
+    }
+
+    /// Set an arbitrary field on the paragraph, honouring the canonical
+    /// DEP-5 Files-paragraph field order.
+    pub fn set_field(&mut self, name: &str, value: &str) {
+        self.0.set_with_field_order(name, value, FILES_FIELD_ORDER);
+    }
+
+    /// Remove a field from the paragraph. A no-op if not present.
+    pub fn remove_field(&mut self, name: &str) {
+        self.0.remove(name);
     }
 
     /// List of file patterns in the paragraph
@@ -873,6 +898,18 @@ impl LicenseParagraph {
     /// Return the underlying Deb822 paragraph
     pub fn as_deb822(&self) -> &Paragraph {
         &self.0
+    }
+
+    /// Set an arbitrary field on the paragraph, honouring the canonical
+    /// DEP-5 standalone-License-paragraph field order.
+    pub fn set_field(&mut self, name: &str, value: &str) {
+        self.0
+            .set_with_field_order(name, value, LICENSE_FIELD_ORDER);
+    }
+
+    /// Remove a field from the paragraph. A no-op if not present.
+    pub fn remove_field(&mut self, name: &str) {
+        self.0.remove(name);
     }
 
     /// Comment associated with the license
@@ -1154,6 +1191,191 @@ License: GPL-3+
         let mut header = copyright.header().unwrap();
         header.set_source("https://example.com/source");
         assert_eq!(header.source().unwrap(), "https://example.com/source");
+    }
+
+    #[test]
+    fn test_header_set_field_honours_field_order() {
+        // Inserting Upstream-Name via set_field should land between Format
+        // and Source, matching the canonical DEP-5 header field order.
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Source: https://example.com/foo
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut header = copyright.header().unwrap();
+        header.set_field("Upstream-Name", "foo");
+
+        assert_eq!(header.upstream_name().as_deref(), Some("foo"));
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\
+                        Upstream-Name: foo\n\
+                        Source: https://example.com/foo\n";
+        assert_eq!(copyright.to_string(), expected);
+    }
+
+    #[test]
+    fn test_header_set_field_updates_existing() {
+        let copyright = super::Copyright::new();
+        let mut header = copyright.header().unwrap();
+        header.set_field("Upstream-Name", "foo");
+        header.set_field("Upstream-Name", "bar");
+        assert_eq!(header.upstream_name().as_deref(), Some("bar"));
+    }
+
+    #[test]
+    fn test_header_set_field_unknown_field() {
+        // Unknown fields aren't in HEADER_FIELD_ORDER but should still be set.
+        let copyright = super::Copyright::new();
+        let mut header = copyright.header().unwrap();
+        header.set_field("X-Custom", "value");
+        assert_eq!(header.as_deb822().get("X-Custom").as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn test_header_remove_field() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: foo
+Source: https://example.com/foo
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut header = copyright.header().unwrap();
+        header.remove_field("Upstream-Name");
+        assert_eq!(header.upstream_name(), None);
+
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\
+                        Source: https://example.com/foo\n";
+        assert_eq!(copyright.to_string(), expected);
+    }
+
+    #[test]
+    fn test_header_remove_field_missing_is_noop() {
+        let copyright = super::Copyright::new();
+        let mut header = copyright.header().unwrap();
+        header.remove_field("Upstream-Name");
+        assert_eq!(header.upstream_name(), None);
+        assert_eq!(
+            copyright.to_string(),
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n"
+        );
+    }
+
+    #[test]
+    fn test_files_paragraph_set_field_honours_field_order() {
+        // Inserting Comment via set_field should land after License,
+        // matching the canonical DEP-5 Files paragraph field order.
+        let mut copyright = super::Copyright::new();
+        let files = vec!["*"];
+        let copyrights = vec!["2020 Joe Bloggs"];
+        let license = crate::License::Name("GPL-3+".to_string());
+        let mut para = copyright.add_files(&files, &copyrights, &license);
+        para.set_field("Comment", "Test comment");
+
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+                        Files: *\n\
+                        Copyright: 2020 Joe Bloggs\n\
+                        License: GPL-3+\n\
+                        Comment: Test comment\n";
+        assert_eq!(copyright.to_string(), expected);
+    }
+
+    #[test]
+    fn test_files_paragraph_remove_field() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2020 Joe Bloggs
+License: GPL-3+
+Comment: drop me
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut files = copyright.iter_files().next().expect("no files paragraph");
+        files.remove_field("Comment");
+        assert_eq!(files.comment(), None);
+
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+                        Files: *\n\
+                        Copyright: 2020 Joe Bloggs\n\
+                        License: GPL-3+\n";
+        assert_eq!(copyright.to_string(), expected);
+    }
+
+    #[test]
+    fn test_files_paragraph_remove_field_missing_is_noop() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2020 Joe Bloggs
+License: GPL-3+
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let before = copyright.to_string();
+        let mut files = copyright.iter_files().next().expect("no files paragraph");
+        files.remove_field("Comment");
+        assert_eq!(copyright.to_string(), before);
+    }
+
+    #[test]
+    fn test_license_paragraph_set_field_honours_field_order() {
+        // Inserting Comment via set_field should land after License,
+        // matching the canonical DEP-5 standalone-License field order.
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ license text
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut license = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+        license.set_field("Comment", "see https://gnu.org/");
+
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+                        License: GPL-3+\n license text\n\
+                        Comment: see https://gnu.org/\n";
+        assert_eq!(copyright.to_string(), expected);
+    }
+
+    #[test]
+    fn test_license_paragraph_remove_field() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ license text
+Comment: drop me
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut license = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+        license.remove_field("Comment");
+        assert_eq!(license.comment(), None);
+
+        let expected =
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+                        License: GPL-3+\n license text\n";
+        assert_eq!(copyright.to_string(), expected);
+    }
+
+    #[test]
+    fn test_license_paragraph_remove_field_missing_is_noop() {
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-3+
+ license text
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let before = copyright.to_string();
+        let mut license = copyright
+            .iter_licenses()
+            .next()
+            .expect("no license paragraph");
+        license.remove_field("Comment");
+        assert_eq!(copyright.to_string(), before);
     }
 
     #[test]
