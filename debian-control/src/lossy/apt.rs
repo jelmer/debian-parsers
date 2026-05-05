@@ -137,7 +137,11 @@ fn join_lines(components: &[String]) -> String {
 }
 
 fn deserialize_package_list(value: &str) -> Result<Vec<String>, String> {
-    Ok(value.split('\n').map(|s| s.to_string()).collect())
+    Ok(value
+        .split('\n')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect())
 }
 
 fn deserialize_checksums<T>(value: &str) -> Result<Vec<T>, String>
@@ -188,6 +192,10 @@ pub struct Source {
     /// Maintainer of the source
     pub maintainer: Option<String>,
 
+    #[deb822(field = "Uploaders")]
+    /// Uploaders of the source
+    pub uploaders: Option<String>,
+
     #[deb822(field = "Build-Depends")]
     /// Build dependencies of the source
     pub build_depends: Option<Relations>,
@@ -223,6 +231,10 @@ pub struct Source {
     #[deb822(field = "Autobuild")]
     /// Whether the source should be autobuilt
     pub autobuild: Option<bool>,
+
+    #[deb822(field = "Extra-Source-Only", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
+    /// Whether this is a source-only upload
+    pub extra_source_only: Option<bool>,
 
     #[deb822(field = "Testsuite")]
     /// Testsuite of the source
@@ -290,7 +302,7 @@ pub struct Source {
 
     #[deb822(field = "Package-List", deserialize_with = deserialize_package_list, serialize_with = join_lines)]
     /// Package list of the source
-    pub package_list: Vec<String>,
+    pub package_list: Option<Vec<String>>,
 
     #[deb822(field = "Files", deserialize_with = deserialize_checksums::<crate::fields::Md5Checksum>, serialize_with = serialize_checksums::<crate::fields::Md5Checksum>)]
     /// MD5 checksums of source files
@@ -407,6 +419,10 @@ pub struct Package {
     #[deb822(field = "Homepage")]
     pub homepage: Option<String>,
 
+    /// Origin
+    #[deb822(field = "Origin")]
+    pub origin: Option<String>,
+
     /// Priority
     #[deb822(field = "Priority")]
     pub priority: Option<crate::fields::Priority>,
@@ -419,9 +435,17 @@ pub struct Package {
     #[deb822(field = "Essential", deserialize_with = deserialize_yesno, serialize_with = serialize_yesno)]
     pub essential: Option<bool>,
 
+    /// Multi-Arch
+    #[deb822(field = "Multi-Arch")]
+    pub multi_arch: Option<crate::fields::MultiArch>,
+
     /// Tag
     #[deb822(field = "Tag")]
     pub tag: Option<String>,
+
+    /// Task
+    #[deb822(field = "Task")]
+    pub task: Option<String>,
 
     /// Size
     #[deb822(field = "Size")]
@@ -688,6 +712,200 @@ Section: science
                     .collect()
             )
         );
+
+        // Test Uploaders field
+        assert_eq!(
+            source.uploaders,
+            Some("Andreas Tille <tille@debian.org>, Michael Banck <mbanck@debian.org>".to_string())
+        );
+
+        // Test Files checksum list
+        let files = source.files.as_ref().unwrap();
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].md5sum, "843550cbd14395c0b9408158a91a239c");
+        assert_eq!(files[0].size, 2464);
+        assert_eq!(files[0].filename, "abinit_9.10.4-3.dsc");
+
+        // Test Checksums-Sha256 list
+        let checksums_sha256 = source.checksums_sha256.as_ref().unwrap();
+        assert_eq!(checksums_sha256.len(), 3);
+        assert_eq!(
+            checksums_sha256[0].sha256,
+            "c3c217b14bc5705a1d8930a2e7fcef58e64beaa22abc213e2eacc7d5537ef840"
+        );
+        assert_eq!(checksums_sha256[0].size, 2464);
+        assert_eq!(checksums_sha256[0].filename, "abinit_9.10.4-3.dsc");
+
+        // Test Package-List
+        let package_list = source.package_list.as_ref().unwrap();
+        assert_eq!(package_list.len(), 3);
+        assert!(package_list[0].starts_with("abinit "));
+    }
+
+    #[test]
+    fn test_source_with_extra_source_only() {
+        let source = r#"Package: test-pkg
+Version: 1.0-1
+Maintainer: Test Maintainer <test@example.com>
+Extra-Source-Only: yes
+Directory: pool/main/t/test-pkg
+"#;
+
+        let source: Source = source.parse().unwrap();
+        assert_eq!(source.package, "test-pkg");
+        assert_eq!(source.extra_source_only, Some(true));
+    }
+
+    #[test]
+    fn test_source_with_checksums_sha1() {
+        let source = r#"Package: test-pkg
+Version: 1.0-1
+Maintainer: Test Maintainer <test@example.com>
+Checksums-Sha1:
+ da39a3ee5e6b4b0d3255bfef95601890afd80709 0 test_1.0-1.dsc
+Directory: pool/main/t/test-pkg
+"#;
+
+        let source: Source = source.parse().unwrap();
+        let checksums = source.checksums_sha1.as_ref().unwrap();
+        assert_eq!(checksums.len(), 1);
+        assert_eq!(
+            checksums[0].sha1,
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        );
+        assert_eq!(checksums[0].size, 0);
+        assert_eq!(checksums[0].filename, "test_1.0-1.dsc");
+    }
+
+    #[test]
+    fn test_source_with_checksums_sha512() {
+        let source = r#"Package: test-pkg
+Version: 1.0-1
+Maintainer: Test Maintainer <test@example.com>
+Checksums-Sha512:
+ cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e 0 test_1.0-1.dsc
+Directory: pool/main/t/test-pkg
+"#;
+
+        let source: Source = source.parse().unwrap();
+        let checksums = source.checksums_sha512.as_ref().unwrap();
+        assert_eq!(checksums.len(), 1);
+        assert_eq!(checksums[0].sha512, "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e");
+        assert_eq!(checksums[0].size, 0);
+        assert_eq!(checksums[0].filename, "test_1.0-1.dsc");
+    }
+
+    #[test]
+    fn test_package_with_multi_arch() {
+        let package = r#"Package: test-pkg
+Version: 1.0-1
+Architecture: amd64
+Multi-Arch: same
+"#;
+
+        let package: Package = package.parse().unwrap();
+        assert_eq!(package.name, "test-pkg");
+        assert_eq!(package.multi_arch, Some(crate::fields::MultiArch::Same));
+    }
+
+    #[test]
+    fn test_package_with_all_checksums() {
+        let package = r#"Package: test-pkg
+Version: 1.0-1
+Architecture: amd64
+MD5sum: d41d8cd98f00b204e9800998ecf8427e
+SHA1: da39a3ee5e6b4b0d3255bfef95601890afd80709
+SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+SHA512: cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e
+"#;
+
+        let package: Package = package.parse().unwrap();
+        assert_eq!(
+            package.md5sum,
+            Some("d41d8cd98f00b204e9800998ecf8427e".to_string())
+        );
+        assert_eq!(
+            package.sha1,
+            Some("da39a3ee5e6b4b0d3255bfef95601890afd80709".to_string())
+        );
+        assert_eq!(
+            package.sha256,
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_string())
+        );
+        assert_eq!(package.sha512, Some("cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e".to_string()));
+    }
+
+    #[test]
+    fn test_package_with_filename() {
+        let package = r#"Package: test-pkg
+Version: 1.0-1
+Architecture: amd64
+Filename: pool/main/t/test-pkg/test-pkg_1.0-1_amd64.deb
+"#;
+
+        let package: Package = package.parse().unwrap();
+        assert_eq!(
+            package.filename,
+            Some("pool/main/t/test-pkg/test-pkg_1.0-1_amd64.deb".to_string())
+        );
+    }
+
+    #[test]
+    fn test_package_with_task() {
+        let package = r#"Package: ubuntu-desktop
+Version: 1.0
+Architecture: amd64
+Task: ubuntu-desktop
+"#;
+
+        let package: Package = package.parse().unwrap();
+        assert_eq!(package.task, Some("ubuntu-desktop".to_string()));
+    }
+
+    #[test]
+    fn test_package_with_origin() {
+        let package = r#"Package: test-pkg
+Version: 1.0-1
+Architecture: amd64
+Origin: Debian
+"#;
+
+        let package: Package = package.parse().unwrap();
+        assert_eq!(package.origin, Some("Debian".to_string()));
+    }
+
+    #[test]
+    fn test_package_full_with_all_new_fields() {
+        let package = r#"Package: test-pkg
+Version: 1.0-1
+Architecture: amd64
+Multi-Arch: foreign
+Origin: Ubuntu
+Task: minimal
+Filename: pool/main/t/test-pkg/test-pkg_1.0-1_amd64.deb
+Size: 1234
+MD5sum: d41d8cd98f00b204e9800998ecf8427e
+SHA1: da39a3ee5e6b4b0d3255bfef95601890afd80709
+SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+SHA512: cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e
+"#;
+
+        let package: Package = package.parse().unwrap();
+        assert_eq!(package.name, "test-pkg");
+        assert_eq!(package.version, "1.0-1".parse().unwrap());
+        assert_eq!(package.architecture, "amd64");
+        assert_eq!(package.multi_arch, Some(crate::fields::MultiArch::Foreign));
+        assert_eq!(package.origin, Some("Ubuntu".to_string()));
+        assert_eq!(package.task, Some("minimal".to_string()));
+        assert_eq!(
+            package.filename,
+            Some("pool/main/t/test-pkg/test-pkg_1.0-1_amd64.deb".to_string())
+        );
+        assert_eq!(package.size, Some(1234));
+        assert!(package.md5sum.is_some());
+        assert!(package.sha1.is_some());
+        assert!(package.sha256.is_some());
+        assert!(package.sha512.is_some());
     }
 
     #[test]
