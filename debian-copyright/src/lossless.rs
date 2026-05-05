@@ -81,7 +81,7 @@ fn decode_field_text(text: &str) -> String {
 /// # Returns
 ///
 /// The encoded text with blank lines replaced by "."
-fn encode_field_text(text: &str) -> String {
+pub fn encode_field_text(text: &str) -> String {
     text.lines()
         .map(|line| {
             if line.is_empty() {
@@ -710,9 +710,17 @@ impl FilesParagraph {
     }
 
     /// Set an arbitrary field on the paragraph, honouring the canonical
-    /// DEP-5 Files-paragraph field order.
+    /// DEP-5 Files-paragraph field order. The `License` field is forced
+    /// to 1-space indentation per DEP-5; other fields preserve existing
+    /// or auto-detected indentation.
     pub fn set_field(&mut self, name: &str, value: &str) {
-        self.0.set_with_field_order(name, value, FILES_FIELD_ORDER);
+        if name.eq_ignore_ascii_case("License") {
+            let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+            self.0
+                .set_with_forced_indent(name, value, &indent_pattern, Some(FILES_FIELD_ORDER));
+        } else {
+            self.0.set_with_field_order(name, value, FILES_FIELD_ORDER);
+        }
     }
 
     /// Remove a field from the paragraph. A no-op if not present.
@@ -901,10 +909,18 @@ impl LicenseParagraph {
     }
 
     /// Set an arbitrary field on the paragraph, honouring the canonical
-    /// DEP-5 standalone-License-paragraph field order.
+    /// DEP-5 standalone-License-paragraph field order. The `License`
+    /// field is forced to 1-space indentation per DEP-5; other fields
+    /// preserve existing or auto-detected indentation.
     pub fn set_field(&mut self, name: &str, value: &str) {
-        self.0
-            .set_with_field_order(name, value, LICENSE_FIELD_ORDER);
+        if name.eq_ignore_ascii_case("License") {
+            let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+            self.0
+                .set_with_forced_indent(name, value, &indent_pattern, Some(LICENSE_FIELD_ORDER));
+        } else {
+            self.0
+                .set_with_field_order(name, value, LICENSE_FIELD_ORDER);
+        }
     }
 
     /// Remove a field from the paragraph. A no-op if not present.
