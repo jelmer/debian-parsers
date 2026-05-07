@@ -109,13 +109,27 @@ pub type SyntaxToken = rowan::SyntaxToken<Lang>;
 /// Syntax element type for lintian overrides
 pub type SyntaxElement = rowan::NodeOrToken<SyntaxNode, SyntaxToken>;
 
-/// The result of parsing a lintian-overrides file
-#[derive(Debug, Clone)]
+/// The result of parsing a lintian-overrides file.
+///
+/// `PartialEq` / `Eq` compare the underlying `GreenNode` (cheap —
+/// rowan green nodes are interned) and the errors, so this type
+/// can be stored in a Salsa database. The manual `Send` / `Sync`
+/// impls assert that `Parse` itself is thread-safe even when `T`
+/// (the AST node type) wraps a non-thread-safe `SyntaxNode`: the
+/// only field carrying real data is the `GreenNode`, which is
+/// thread-safe. The phantom `T` exists for type-tagging only.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parse<T> {
     green: GreenNode,
     errors: Vec<String>,
     _phantom: std::marker::PhantomData<T>,
 }
+
+// SAFETY: The only data Parse holds is the GreenNode (thread-safe
+// — that's the whole point of rowan's red-green split) and the
+// errors Vec. The PhantomData<T> contributes no runtime data.
+unsafe impl<T> Send for Parse<T> {}
+unsafe impl<T> Sync for Parse<T> {}
 
 impl<T> Parse<T> {
     fn new(green: GreenNode, errors: Vec<String>) -> Self {
@@ -146,6 +160,21 @@ impl<T> Parse<T> {
         } else {
             Err(self.errors)
         }
+    }
+
+    /// Return the parsed tree even when there are errors.
+    ///
+    /// Lintian-overrides parsing is resilient: the parser always
+    /// produces a green tree (well-formed lines + recovered tokens
+    /// for malformed ones), so consumers that want partial output —
+    /// LSP semantic tokens, completion lookups, hover — should walk
+    /// `tree()` rather than throwing the whole document away on the
+    /// first parse error via `ok()`.
+    pub fn tree(&self) -> T
+    where
+        T: AstNode,
+    {
+        T::cast(self.syntax()).expect("root node has wrong type")
     }
 }
 
