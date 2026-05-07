@@ -241,6 +241,53 @@ impl std::str::FromStr for PatchHeader {
     }
 }
 
+/// Find the byte offset where the DEP-3 header in `content` ends, i.e.
+/// the start of the first `---` / `diff ` / `Index:` line. Returns
+/// `content.len()` if the file is header-only (no diff body).
+///
+/// This lets callers split a complete patch file into its header (a
+/// deb822 paragraph) and its unified diff (which DEP-3 leaves
+/// unspecified). Both [`parse_relaxed`](PatchHeader::parse_relaxed) and
+/// the lossy [`crate::lossy::PatchHeader`] use this internally; it's
+/// exposed for callers that need to map source ranges back into the
+/// original file.
+pub fn header_end(content: &str) -> usize {
+    let mut offset = 0;
+    for line in content.split_inclusive('\n') {
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.starts_with("---")
+            || trimmed.starts_with("diff ")
+            || trimmed.starts_with("Index:")
+        {
+            return offset;
+        }
+        offset += line.len();
+    }
+    content.len()
+}
+
+impl PatchHeader {
+    /// Parse a patch file's DEP-3 header, tolerating a trailing unified
+    /// diff body. Splits `content` at the first `---` / `diff ` /
+    /// `Index:` line and parses only the header portion.
+    ///
+    /// Returns the parsed header and the byte offset where the diff
+    /// body starts (equal to `content.len()` if there is no diff body).
+    /// Use this for files like `debian/patches/foo.patch` where the
+    /// caller has the whole file in hand and wants just the header.
+    ///
+    /// `from_str` parses the input as deb822 in its entirety and will
+    /// fail (or, with malformed continuations, misparse) when handed a
+    /// patch with diff content; `parse_relaxed` is the appropriate
+    /// entry point for that case.
+    pub fn parse_relaxed(content: &str) -> Result<(Self, usize), deb822_lossless::ParseError> {
+        use std::str::FromStr;
+        let end = header_end(content);
+        let header = PatchHeader::from_str(&content[..end])?;
+        Ok((header, end))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::PatchHeader;
@@ -438,6 +485,44 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
             header.vendor_bugs("Ubuntu").collect::<Vec<_>>(),
             vec!["http://bugs.launchpad.net/123".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_relaxed_splits_at_dashes() {
+        let text = "Author: alice\nDescription: bla\n---\n@@ -1 +1 @@\n-x\n+y\n";
+        let (header, end) = PatchHeader::parse_relaxed(text).unwrap();
+        assert_eq!(end, "Author: alice\nDescription: bla\n".len());
+        assert_eq!(header.author(), Some("alice".to_string()));
+        assert_eq!(header.description(), Some("bla".to_string()));
+    }
+
+    #[test]
+    fn parse_relaxed_splits_at_diff_word() {
+        let text = "Author: alice\ndiff --git a/foo b/foo\n";
+        let (header, end) = PatchHeader::parse_relaxed(text).unwrap();
+        assert_eq!(end, "Author: alice\n".len());
+        assert_eq!(header.author(), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn parse_relaxed_splits_at_index_marker() {
+        let text = "Author: alice\nIndex: foo\n@@ -1 +1 @@\n";
+        let (header, end) = PatchHeader::parse_relaxed(text).unwrap();
+        assert_eq!(end, "Author: alice\n".len());
+        assert_eq!(header.author(), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn parse_relaxed_handles_header_only() {
+        let text = "Author: alice\nDescription: bla\n";
+        let (header, end) = PatchHeader::parse_relaxed(text).unwrap();
+        assert_eq!(end, text.len());
+        assert_eq!(header.author(), Some("alice".to_string()));
+    }
+
+    #[test]
+    fn header_end_handles_empty() {
+        assert_eq!(super::header_end(""), 0);
     }
 
     #[test]
