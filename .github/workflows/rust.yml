@@ -21,6 +21,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+      - name: Install dependencies (Ubuntu)
+        run: sudo apt install clang llvm pkg-config nettle-dev
+        if: matrix.os == 'ubuntu-latest'
+      - name: Install dependencies (macOS)
+        run: brew install nettle
+        if: matrix.os == 'macos-latest'
       - name: Install OpenSSL on macOS
         if: matrix.os == 'macos-latest'
         run: brew install openssl@3
