@@ -1067,10 +1067,7 @@ Matching-Pattern: .*\.tar\.xz
         let range = entry.matching_pattern_range().expect("has pattern");
         let start: usize = range.start().into();
         let end: usize = range.end().into();
-        assert_eq!(
-            &content[start..end],
-            "Matching-Pattern: v(.+)\\.tar\\.gz\n"
-        );
+        assert_eq!(&content[start..end], "Matching-Pattern: v(.+)\\.tar\\.gz\n");
     }
 
     #[cfg(feature = "deb822")]
@@ -1093,8 +1090,7 @@ Matching-Pattern: .*\.tar\.xz
     #[cfg(feature = "deb822")]
     #[test]
     fn test_version_range_deb822() {
-        let content =
-            "Version: 5\n\nSource: https://example.com/foo\nMatching-Pattern: x\n";
+        let content = "Version: 5\n\nSource: https://example.com/foo\nMatching-Pattern: x\n";
         let wf = parse(content).unwrap();
         let range = wf.version_range().expect("has version");
         let start: usize = range.start().into();
