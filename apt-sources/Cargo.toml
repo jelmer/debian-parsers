@@ -30,7 +30,7 @@ sequoia-net = { version = "0.30", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
 sequoia-openpgp = { version = "2.0", default-features = false, features = [
     "compression-deflate",
-    "crypto-openssl",
+    "crypto-nettle",
 ], optional = true }
 regex = { version = "1.11.1", optional = true }
 itertools = { version = "0.14.0" }

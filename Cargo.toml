@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = [ "deb822-lossless", "deb822-derive", "deb822-fast", "debian-control", "debian-copyright", "dep3", "apt-sources"]
+members = [ "deb822-lossless", "deb822-derive", "deb822-fast", "debian-control", "debian-copyright", "dep3", "apt-sources", "debian-watch"]
 
 [workspace.package]
-repository = "https://github.com/jelmer/deb822-lossless"
-homepage = "https://github.com/jelmer/deb822-lossless"
+repository = "https://github.com/jelmer/deb822-rs"
+homepage = "https://github.com/jelmer/deb822-rs"
 
 [workspace.dependencies]
 rowan = "0.16"

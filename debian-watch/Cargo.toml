@@ -1,0 +1,39 @@
+[package]
+name = "debian-watch"
+version = "0.4.10"
+authors = [ "Jelmer Vernooij <jelmer@debian.org>",]
+edition = "2021"
+license = "Apache-2.0"
+description = "parser for Debian watch files"
+repository = "https://github.com/jelmer/deb822-rs"
+homepage = "https://github.com/jelmer/deb822-rs"
+
+[features]
+default = ["linebased", "deb822"]
+linebased = []
+discover = ["scraper", "reqwest"]
+blocking = ["reqwest?/blocking"]
+pgp = ["sequoia-openpgp", "anyhow"]
+deb822 = ["dep:deb822-lossless"]
+
+[dependencies]
+rowan = "0.16.1"
+m_lexer = "0.0.4"
+debversion = ">=0.4.7, <0.6"
+url = "2.5.7"
+deb822-lossless = { version = "0.5.15", optional = true, path = "../deb822-lossless" }
+clap = { version = "4.5", features = ["derive"] }
+regex = "1"
+scraper = { version = ">=0.22, <0.27", optional = true }
+reqwest = { version = ">=0.12,<0.14", optional = true }
+sequoia-openpgp = { version = "2.0", optional = true, default-features = false, features = ["crypto-nettle"] }
+anyhow = { version = "1.0", optional = true }
+
+[dev-dependencies]
+maplit = "1.0.2"
+tokio = { version = "1", features = ["macros", "rt"] }
+tiny_http = "0.12"
+
+[[bin]]
+name = "convert-watch-v5"
+required-features = ["deb822", "linebased"]
