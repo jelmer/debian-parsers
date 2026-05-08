@@ -11,6 +11,7 @@ name: Publish to crates.io
       - "debian-copyright-*"
       - "dep3-*"
       - "apt-sources-*"
+      - "debian-watch-*"
 
 jobs:
   publish:

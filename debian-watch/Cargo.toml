@@ -5,8 +5,8 @@ authors = [ "Jelmer Vernooij <jelmer@debian.org>",]
 edition = "2021"
 license = "Apache-2.0"
 description = "parser for Debian watch files"
-repository = "https://github.com/jelmer/debian-watch-rs.git"
-homepage = "https://github.com/jelmer/debian-watch-rs"
+repository = "https://github.com/jelmer/deb822-rs"
+homepage = "https://github.com/jelmer/deb822-rs"
 
 [features]
 default = ["linebased", "deb822"]
@@ -21,7 +21,7 @@ rowan = "0.16.1"
 m_lexer = "0.0.4"
 debversion = ">=0.4.7, <0.6"
 url = "2.5.7"
-deb822-lossless = { version = "0.5.15", optional = true }
+deb822-lossless = { version = "0.5.15", optional = true, path = "../deb822-lossless" }
 clap = { version = "4.5", features = ["derive"] }
 regex = "1"
 scraper = { version = ">=0.22, <0.27", optional = true }
