@@ -11,7 +11,6 @@ Four related crates that build on these two crates are:
 
 * ``debian-control``: A parser and editor for Debian control files, apt lists.
 * ``debian-copyright``: A parser and editor for Debian copyright files.
-* ``debian-watch``: A parser and editor for debian/watch files (format 5+ is deb822-based)
 * ``dep3``: A parser and editor for Debian DEP-3 headers.
 * [r-description](https://github.com/jelmer/r-description-rs): A parser and
 editor for R DESCRIPTION files.
