@@ -291,6 +291,11 @@ impl OverrideLine {
         self.tag().map(|t| t.text_range())
     }
 
+    /// Get the source range of this override line.
+    pub fn text_range(&self) -> rowan::TextRange {
+        self.syntax.text_range()
+    }
+
     /// Get the info text
     pub fn info(&self) -> Option<String> {
         let tokens: Vec<_> = self
