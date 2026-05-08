@@ -286,6 +286,11 @@ impl OverrideLine {
             .find(|it| it.kind() == TAG)
     }
 
+    /// Get the source range of the tag token, if present.
+    pub fn tag_range(&self) -> Option<rowan::TextRange> {
+        self.tag().map(|t| t.text_range())
+    }
+
     /// Get the info text
     pub fn info(&self) -> Option<String> {
         let tokens: Vec<_> = self
@@ -306,6 +311,26 @@ impl OverrideLine {
                     .join(" "),
             )
         }
+    }
+
+    /// Get the source range spanned by the info tokens, if any are present.
+    ///
+    /// When multiple `INFO` tokens are present the range spans from the start
+    /// of the first to the end of the last.
+    pub fn info_range(&self) -> Option<rowan::TextRange> {
+        let mut tokens = self
+            .syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == INFO);
+        let first = tokens.next()?;
+        let last = tokens.last().unwrap_or_else(|| first.clone());
+        Some(first.text_range().cover(last.text_range()))
+    }
+
+    /// Get the package name from the package spec, if present.
+    pub fn package(&self) -> Option<String> {
+        self.package_spec()?.package_name()
     }
 
     /// Get the text representation of this line
