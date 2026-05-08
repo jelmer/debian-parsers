@@ -3084,8 +3084,6 @@ dependencies = [
  "libc",
  "memsec",
  "nettle",
- "openssl",
- "openssl-sys",
  "regex",
  "regex-syntax",
  "sha1collisiondetection",
