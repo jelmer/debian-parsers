@@ -1,0 +1,16 @@
+[package]
+name = "lintian-overrides"
+version = "0.1.3"
+authors = ["Jelmer Vernooij <jelmer@jelmer.uk>"]
+edition = "2021"
+license = "Apache-2.0"
+description = "Parser for Debian lintian override files"
+repository = "https://github.com/jelmer/lintian-overrides-rs"
+homepage = "https://github.com/jelmer/lintian-overrides-rs"
+readme = "README.md"
+documentation = "https://docs.rs/lintian-overrides"
+
+[dependencies]
+rowan = "0.16"
+lazy_static = "1"
+regex = "1"
