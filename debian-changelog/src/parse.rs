@@ -3824,6 +3824,7 @@ breezy (3.3.3-1) unstable; urgency=low
         assert!(lines.iter().any(|l| l.contains("Second change")));
     }
 
+    #[cfg(feature = "chrono")]
     #[test]
     fn test_datetime_with_incorrect_day_of_week() {
         // Test for bug: datetime() should parse leniently even when day-of-week doesn't match
