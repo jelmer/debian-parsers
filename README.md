@@ -22,5 +22,5 @@ editor for R DESCRIPTION files.
 
 ## Other parsers
 
-* `debian-cangelog`: A parser and editor for Debian changelog files
+* `debian-changelog`: A parser and editor for Debian changelog files
 * `lintian-overrides`: A parser and editor for lintian override files
