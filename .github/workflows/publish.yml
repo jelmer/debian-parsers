@@ -12,6 +12,7 @@ name: Publish to crates.io
       - "dep3-*"
       - "apt-sources-*"
       - "debian-watch-*"
+      - "lintian-overrides-*"
 
 jobs:
   publish:
