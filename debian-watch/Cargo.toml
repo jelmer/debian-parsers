@@ -5,8 +5,8 @@ authors = [ "Jelmer Vernooij <jelmer@debian.org>",]
 edition = "2021"
 license = "Apache-2.0"
 description = "parser for Debian watch files"
-repository = "https://github.com/jelmer/deb822-rs"
-homepage = "https://github.com/jelmer/deb822-rs"
+repository = { workspace = true }
+homepage = { workspace = true }
 
 [features]
 default = ["linebased", "deb822"]
