@@ -1,6 +1,6 @@
 # debian version handling in rust
 
-This simple crate provides a struct for parsing, validating, manipulating and
+This crate provides a struct for parsing, validating, manipulating and
 comparing Debian version strings.
 
 It aims to follow the version specification as described in Debian policy
