@@ -21,6 +21,31 @@ use deb822_lossless::Paragraph;
 
 use crate::fields::*;
 
+/// Encode free text for storage in a deb822 multi-line field value.
+///
+/// deb822 multi-line values cannot contain blank lines (lines that are
+/// empty or contain only whitespace), because the parser interprets those
+/// as paragraph separators.  By convention, a blank line is represented
+/// as a continuation line containing only a single dot (` .`).  This
+/// function applies that encoding so that the result is safe to pass to
+/// [`Paragraph::insert`].
+fn encode_multiline_value(text: &str) -> String {
+    // Replace every \n followed by another \n (or by whitespace-only
+    // content up to the next \n) with the deb822 blank-line marker.
+    let mut out = String::with_capacity(text.len());
+    for line in text.split('\n') {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        if line.trim().is_empty() && !out.is_empty() {
+            out.push_str(" .");
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
 /// A Debian patch header.
 pub struct PatchHeader(Paragraph);
 
@@ -164,6 +189,7 @@ impl PatchHeader {
 
     /// Set the description of the patch.
     pub fn set_description(&mut self, description: &str) {
+        let description = encode_multiline_value(description);
         if let Some(subject) = self.0.get("Subject") {
             // Replace the first line with ours
             let new = format!(
@@ -171,17 +197,17 @@ impl PatchHeader {
                 description,
                 subject.split_once('\n').map(|x| x.1).unwrap_or("")
             );
-            self.0.insert("Subject", new.as_str());
-        } else if let Some(description) = self.0.get("Description") {
+            self.0.set("Subject", new.as_str());
+        } else if let Some(existing) = self.0.get("Description") {
             // Replace the first line with ours
             let new = format!(
                 "{}\n{}",
-                description.split_once('\n').map(|x| x.1).unwrap_or(""),
-                description
+                description,
+                existing.split_once('\n').map(|x| x.1).unwrap_or("")
             );
-            self.0.insert("Description", new.as_str());
+            self.0.set("Description", new.as_str());
         } else {
-            self.0.insert("Description", description);
+            self.0.insert("Description", description.as_str());
         }
     }
 
@@ -194,6 +220,7 @@ impl PatchHeader {
 
     /// Set the long description of the patch.
     pub fn set_long_description(&mut self, long_description: &str) {
+        let long_description = encode_multiline_value(long_description);
         if let Some(subject) = self.0.get("Subject") {
             // Keep the first line, but replace the rest with our text
             let first_line = subject
@@ -201,7 +228,7 @@ impl PatchHeader {
                 .map(|x| x.0)
                 .unwrap_or(subject.as_str());
             let new = format!("{}\n{}", first_line, long_description);
-            self.0.insert("Subject", new.as_str());
+            self.0.set("Subject", new.as_str());
         } else if let Some(description) = self.0.get("Description") {
             // Keep the first line, but replace the rest with our text
             let first_line = description
@@ -209,9 +236,9 @@ impl PatchHeader {
                 .map(|x| x.0)
                 .unwrap_or(description.as_str());
             let new = format!("{}\n{}", first_line, long_description);
-            self.0.insert("Description", new.as_str());
+            self.0.set("Description", new.as_str());
         } else {
-            self.0.insert("Description", long_description);
+            self.0.insert("Description", long_description.as_str());
         }
     }
 
@@ -533,5 +560,37 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
         let date = chrono::NaiveDate::from_ymd_opt(2023, 5, 15).unwrap();
         header.set_last_update(date);
         assert_eq!(header.last_update(), Some(date));
+    }
+
+    #[test]
+    fn test_set_description_with_blank_lines() {
+        // Descriptions containing blank lines (e.g. from fixer result messages)
+        // must be encoded as " ." continuation lines so that deb822-lossless
+        // does not reject them as empty continuation lines.
+        let mut header = PatchHeader::new();
+        header.set_description("Fix frobnication\n\nDetails follow.");
+        // The stored Description value must be parseable (no panic / error).
+        let rendered = header.to_string();
+        let reparsed = PatchHeader::from_str(&rendered).unwrap();
+        assert_eq!(reparsed.description(), Some("Fix frobnication".to_string()));
+        // Blank line must have been encoded as " ."
+        assert!(
+            rendered.contains(" ."),
+            "blank line should be encoded as ' .'"
+        );
+    }
+
+    #[test]
+    fn test_set_description_replaces_first_line() {
+        // When a Description already exists, set_description replaces its
+        // first line while preserving the rest.
+        let text = "Description: old summary\n old long description\n";
+        let mut header = PatchHeader::from_str(text).unwrap();
+        header.set_description("new summary");
+        assert_eq!(header.description(), Some("new summary".to_string()));
+        assert_eq!(
+            header.long_description(),
+            Some("old long description".to_string())
+        );
     }
 }
