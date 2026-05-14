@@ -75,6 +75,79 @@ impl std::fmt::Display for VersionConstraint {
     }
 }
 
+#[cfg(feature = "serde")]
+impl serde::Serialize for VersionConstraint {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for VersionConstraint {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod version_constraint_serde_tests {
+    use super::VersionConstraint;
+
+    #[test]
+    fn test_serialize() {
+        assert_eq!(
+            serde_json::to_string(&VersionConstraint::GreaterThanEqual).unwrap(),
+            "\">=\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&VersionConstraint::LessThanEqual).unwrap(),
+            "\"<=\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&VersionConstraint::Equal).unwrap(),
+            "\"=\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&VersionConstraint::GreaterThan).unwrap(),
+            "\">>\"",
+        );
+        assert_eq!(
+            serde_json::to_string(&VersionConstraint::LessThan).unwrap(),
+            "\"<<\"",
+        );
+    }
+
+    #[test]
+    fn test_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<VersionConstraint>("\">=\"").unwrap(),
+            VersionConstraint::GreaterThanEqual,
+        );
+        assert_eq!(
+            serde_json::from_str::<VersionConstraint>("\"<=\"").unwrap(),
+            VersionConstraint::LessThanEqual,
+        );
+        assert_eq!(
+            serde_json::from_str::<VersionConstraint>("\"=\"").unwrap(),
+            VersionConstraint::Equal,
+        );
+        assert_eq!(
+            serde_json::from_str::<VersionConstraint>("\">>\"").unwrap(),
+            VersionConstraint::GreaterThan,
+        );
+        assert_eq!(
+            serde_json::from_str::<VersionConstraint>("\"<<\"").unwrap(),
+            VersionConstraint::LessThan,
+        );
+    }
+
+    #[test]
+    fn test_deserialize_invalid() {
+        assert!(serde_json::from_str::<VersionConstraint>("\"!!\"").is_err());
+    }
+}
+
 /// Let's start with defining all kinds of tokens and
 /// composite nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
