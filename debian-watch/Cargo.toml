@@ -1,6 +1,6 @@
 [package]
 name = "debian-watch"
-version = "0.4.10"
+version = "0.4.11"
 authors = [ "Jelmer Vernooij <jelmer@debian.org>",]
 edition = "2021"
 license = "Apache-2.0"
