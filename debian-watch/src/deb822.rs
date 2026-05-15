@@ -50,11 +50,11 @@ impl std::fmt::Display for ParseError {
 }
 
 /// A watch file in format 5 (RFC822/deb822 style)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WatchFile(Deb822);
 
 /// An entry in a format 5 watch file
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     paragraph: Paragraph,
     defaults: Option<Paragraph>,
