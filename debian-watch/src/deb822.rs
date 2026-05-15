@@ -66,6 +66,19 @@ impl WatchFile {
         &self.0
     }
 
+    /// Capture an independent snapshot of this watch file.
+    /// See [`crate::parse::ParsedWatchFile::snapshot`] for semantics.
+    pub fn snapshot(&self) -> Self {
+        WatchFile(self.0.snapshot())
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent `snapshot()`.
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        self.0.tree_eq(&other.0)
+    }
+
     /// Construct a WatchFile from an already-parsed Deb822 document.
     ///
     /// This avoids re-parsing when the caller already has a parsed tree.

@@ -141,6 +141,26 @@ pub struct Control {
 }
 
 impl Control {
+    /// Capture an independent snapshot of this Control file.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree. Subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        Control {
+            deb822: self.deb822.snapshot(),
+            parse_mode: self.parse_mode,
+        }
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent [`Self::snapshot`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        self.deb822.tree_eq(&other.deb822)
+    }
+
     /// Create a new control file with strict parsing
     pub fn new() -> Self {
         Control {
@@ -170,21 +190,6 @@ impl Control {
     /// Return the underlying deb822 object
     pub fn as_deb822(&self) -> &Deb822 {
         &self.deb822
-    }
-
-    /// Create an independent snapshot of this Control file.
-    ///
-    /// This creates a new Control with an independent copy of the underlying
-    /// deb822 data. Modifications to the original will not affect the snapshot
-    /// and vice versa.
-    ///
-    /// This is more efficient than serializing and re-parsing because it reuses
-    /// the GreenNode structure from the rowan tree.
-    pub fn snapshot(&self) -> Self {
-        Control {
-            deb822: self.deb822.snapshot(),
-            parse_mode: self.parse_mode,
-        }
     }
 
     /// Parse control file text, returning a Parse result

@@ -123,6 +123,23 @@ const FILES_SEPARATOR: &str = " ";
 pub struct Copyright(Deb822);
 
 impl Copyright {
+    /// Capture an independent snapshot of this copyright file.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree: subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        Copyright(self.0.snapshot())
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent [`Self::snapshot`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        self.0.tree_eq(&other.0)
+    }
+
     /// Create a new copyright file, with the current format
     pub fn new() -> Self {
         let mut deb822 = Deb822::new();
