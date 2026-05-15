@@ -210,6 +210,29 @@ impl AstNode for LintianOverrides {
 }
 
 impl LintianOverrides {
+    /// Capture an independent snapshot of this lintian-overrides file.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree: subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        LintianOverrides {
+            syntax: SyntaxNode::new_root_mut(self.syntax.green().into_owned()),
+        }
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent `snapshot()`.
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        let a = self.syntax.green();
+        let b = other.syntax.green();
+        let a_ref: &rowan::GreenNodeData = &a;
+        let b_ref: &rowan::GreenNodeData = &b;
+        std::ptr::eq(a_ref as *const _, b_ref as *const _) || a_ref == b_ref
+    }
+
     /// Parse a lintian-overrides file
     pub fn parse(text: &str) -> Parse<Self> {
         let (green, errors) = parse_lintian_overrides(text);

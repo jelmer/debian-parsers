@@ -1145,6 +1145,27 @@ impl FromIterator<Entry> for ChangeLog {
 }
 
 impl ChangeLog {
+    /// Capture an independent snapshot of this changelog.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree: subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        ChangeLog(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent [`Self::snapshot`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        let a = self.0.green();
+        let b = other.0.green();
+        let a_ref: &rowan::GreenNodeData = &a;
+        let b_ref: &rowan::GreenNodeData = &b;
+        std::ptr::eq(a_ref as *const _, b_ref as *const _) || a_ref == b_ref
+    }
+
     /// Create a new, empty changelog.
     pub fn new() -> ChangeLog {
         let mut builder = GreenNodeBuilder::new();
@@ -4403,5 +4424,17 @@ breezy (3.3.4-1) unstable; urgency=low
 
         // The first entry should differ
         assert_ne!(old_children[0], new_children[0]);
+    }
+
+    #[test]
+    fn test_snapshot_detects_mutation() {
+        let cl: ChangeLog = "foo (1.0) unstable; urgency=low\n\n  * Initial.\n\n -- A B <a@b>  Mon, 01 Jan 2024 00:00:00 +0000\n".parse().unwrap();
+        let snap = cl.snapshot();
+        assert!(cl.tree_eq(&snap));
+
+        let mut entry = cl.iter().next().unwrap();
+        entry.set_package("bar".to_string());
+
+        assert!(!cl.tree_eq(&snap));
     }
 }
