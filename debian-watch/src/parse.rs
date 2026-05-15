@@ -110,7 +110,7 @@ pub fn detect_version(content: &str) -> Option<WatchFileVersion> {
 }
 
 /// Parsed watch file that can be either line-based or deb822 format
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParsedWatchFile {
     /// Line-based watch file (v1-4)
     #[cfg(feature = "linebased")]
@@ -121,7 +121,7 @@ pub enum ParsedWatchFile {
 }
 
 /// Parsed watch entry that can be either line-based or deb822 format
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParsedEntry {
     /// Line-based entry (v1-4)
     #[cfg(feature = "linebased")]
