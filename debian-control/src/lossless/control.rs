@@ -100,7 +100,7 @@ pub const BINARY_FIELD_ORDER: &[&str] = &[
     "Description",
 ];
 
-fn format_field(name: &str, value: &str) -> String {
+fn format_field(name: &str, value: &str, max_line_length_one_liner: Option<usize>) -> String {
     match name {
         "Uploaders" => value
             .split(',')
@@ -119,15 +119,28 @@ fn format_field(name: &str, value: &str) -> String {
         | "Enhances"
         | "Pre-Depends"
         | "Breaks" => {
-            // Try to parse and format the relations, but if parsing fails,
-            // preserve the original value to maintain lossless behavior
-            match value.parse::<Relations>() {
-                Ok(relations) => {
-                    let relations = relations.wrap_and_sort();
-                    relations.to_string()
+            // Try to parse and format the relations.  If parsing fails,
+            // preserve the original value to maintain lossless behaviour.
+            let relations = match value.parse::<Relations>() {
+                Ok(r) => r.wrap_and_sort(),
+                Err(_) => return value.to_string(),
+            };
+            let one_line = relations.to_string();
+
+            // If the one-line form would exceed the requested max line
+            // length (including the field name and ": " prefix), join the
+            // parsed entries with ",\n" so rebuild_value will wrap them
+            // one-per-line.
+            if let Some(mll) = max_line_length_one_liner {
+                if name.len() + 2 + one_line.len() > mll {
+                    return relations
+                        .entries()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",\n");
                 }
-                Err(_) => value.to_string(),
             }
+            one_line
         }
         _ => value.to_string(),
     }
@@ -402,6 +415,9 @@ impl Control {
             a.get("Package").cmp(&b.get("Package"))
         };
 
+        let format = |name: &str, value: &str| -> String {
+            format_field(name, value, max_line_length_one_liner)
+        };
         let wrap_paragraph = |p: &Paragraph| -> Paragraph {
             // TODO: Add Source/Package specific wrapping
             // TODO: Add support for wrapping and sorting fields
@@ -410,7 +426,7 @@ impl Control {
                 immediate_empty_line,
                 max_line_length_one_liner,
                 None,
-                Some(&format_field),
+                Some(&format),
             )
         };
 
@@ -610,12 +626,15 @@ impl Source {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
+        let format = |name: &str, value: &str| -> String {
+            format_field(name, value, max_line_length_one_liner)
+        };
         self.paragraph = self.paragraph.wrap_and_sort(
             indentation,
             immediate_empty_line,
             max_line_length_one_liner,
             None,
-            Some(&format_field),
+            Some(&format),
         );
     }
 
@@ -1139,12 +1158,15 @@ impl Binary {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
+        let format = |name: &str, value: &str| -> String {
+            format_field(name, value, max_line_length_one_liner)
+        };
         self.paragraph = self.paragraph.wrap_and_sort(
             indentation,
             immediate_empty_line,
             max_line_length_one_liner,
             None,
-            Some(&format_field),
+            Some(&format),
         );
     }
 
@@ -2770,6 +2792,78 @@ Architecture: any
         let result = control.source_in_range(range);
         assert!(result.is_some());
         assert_eq!(result.unwrap().name(), Some("test-package".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_and_sort_long_build_depends_wraps_to_one_per_line() {
+        // A Build-Depends value that, on a single line, far exceeds the
+        // requested max_line_length_one_liner must be broken into one
+        // relation per line — matching `wrap-and-sort` behaviour.
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: debhelper-compat (= 13), aaaa, bbbb, cccc, dddd, eeee, ffff, gggg, hhhh, iiii, jjjj
+
+"#;
+        let mut control: Control = input.parse().unwrap();
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+
+        let expected = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: aaaa,
+ bbbb,
+ cccc,
+ dddd,
+ debhelper-compat (= 13),
+ eeee,
+ ffff,
+ gggg,
+ hhhh,
+ iiii,
+ jjjj
+"#;
+        assert_eq!(control.to_string(), expected);
+    }
+
+    #[test]
+    fn test_wrap_and_sort_short_build_depends_stays_one_line() {
+        // A short Build-Depends value that fits within the line length
+        // should remain on a single line.
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: debhelper-compat (= 13), foo, bar
+
+"#;
+        let mut control: Control = input.parse().unwrap();
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+
+        // Note: existing behaviour drops the space after the colon for the
+        // one-liner branch in rebuild_value; that is unrelated to this fix.
+        let expected = "Source: test-package\nMaintainer: Test <test@example.com>\nBuild-Depends:bar, debhelper-compat (= 13), foo\n";
+        assert_eq!(control.to_string(), expected);
+    }
+
+    #[test]
+    fn test_wrap_and_sort_long_build_depends_keeps_brackets_intact() {
+        // Each entry stays whole on its line — including the `(...)`,
+        // `[...]` and `<...>` sections — because we emit by parsed entry
+        // rather than splitting the formatted string on commas.
+        // Note: a separate bug in Relation::wrap_and_sort drops the `!` from
+        // architecture restrictions, so we use a plain `[amd64 arm64]` here.
+        let value = "foo (>= 1.0), bar [amd64 arm64], baz <stage1 !nocheck>, qux, quux, corge, grault, garply, waldo, fred";
+        let input = format!(
+            "Source: test-package\nMaintainer: Test <test@example.com>\nBuild-Depends: {}\n\n",
+            value
+        );
+        let mut control: Control = input.parse().unwrap();
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+        let out = control.to_string();
+        assert!(out.contains("bar [amd64 arm64],\n"), "out was: {}", out);
+        assert!(
+            out.contains(" baz <stage1 !nocheck>,\n"),
+            "out was: {}",
+            out
+        );
+        assert!(out.contains(" foo (>= 1.0),\n"), "out was: {}", out);
     }
 
     #[test]
