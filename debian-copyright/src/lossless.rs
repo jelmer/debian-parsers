@@ -295,8 +295,8 @@ impl Copyright {
         para.set_with_field_order("Copyright", &copyright.join("\n"), FILES_FIELD_ORDER);
         let license_text = match license {
             License::Name(name) => name.to_string(),
-            License::Named(name, text) => format!("{}\n{}", name, text),
-            License::Text(text) => text.to_string(),
+            License::Named(name, text) => format!("{}\n{}", name, encode_field_text(text)),
+            License::Text(text) => encode_field_text(text),
         };
         para.set_with_forced_indent(
             "License",
@@ -828,10 +828,11 @@ impl FilesParagraph {
             x.split_once('\n').map_or_else(
                 || License::Name(x.to_string()),
                 |(name, text)| {
+                    let decoded_text = decode_field_text(text);
                     if name.is_empty() {
-                        License::Text(text.to_string())
+                        License::Text(decoded_text)
                     } else {
-                        License::Named(name.to_string(), text.to_string())
+                        License::Named(name.to_string(), decoded_text)
                     }
                 },
             )
@@ -905,17 +906,7 @@ pub struct LicenseParagraph(Paragraph);
 
 impl From<LicenseParagraph> for License {
     fn from(p: LicenseParagraph) -> Self {
-        let x = p.0.get_multiline("License").unwrap();
-        x.split_once('\n').map_or_else(
-            || License::Name(x.to_string()),
-            |(name, text)| {
-                if name.is_empty() {
-                    License::Text(text.to_string())
-                } else {
-                    License::Named(name.to_string(), text.to_string())
-                }
-            },
-        )
+        p.license()
     }
 }
 
@@ -1350,6 +1341,49 @@ License: GPL-3+
     }
 
     #[test]
+    fn test_files_paragraph_license_decodes_paragraph_markers() {
+        // FilesParagraph::license() must decode `.` paragraph markers to
+        // blank lines, matching LicenseParagraph::license() and the
+        // expectation of set_license() (which encodes them back).
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2020 Joe Bloggs
+License: GPL-3+
+ First paragraph.
+ .
+ Second paragraph.
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let files = copyright.iter_files().next().expect("no files paragraph");
+        let license = files.license().expect("no license");
+        assert_eq!(
+            license.text(),
+            Some("First paragraph.\n\nSecond paragraph.")
+        );
+    }
+
+    #[test]
+    fn test_files_paragraph_license_round_trips() {
+        // license() then set_license() must be a no-op for a multi-paragraph
+        // license body.
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+Files: *
+Copyright: 2020 Joe Bloggs
+License: GPL-3+
+ First paragraph.
+ .
+ Second paragraph.
+"#;
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let mut files = copyright.iter_files().next().expect("no files paragraph");
+        let license = files.license().expect("no license");
+        files.set_license(&license);
+        assert_eq!(copyright.to_string(), s);
+    }
+
+    #[test]
     fn test_license_paragraph_set_field_honours_field_order() {
         // Inserting Comment via set_field should land after License,
         // matching the canonical DEP-5 standalone-License field order.
@@ -1445,6 +1479,31 @@ License: GPL-3+
     }
 
     #[test]
+    fn test_license_from_license_paragraph_decodes_markers() {
+        // `License::from(LicenseParagraph)` must agree with
+        // LicenseParagraph::license(): both decode `.` paragraph markers.
+        let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+
+License: GPL-2+
+ First paragraph.
+ .
+ Second paragraph.
+"#;
+        let copyright = s.parse::<super::Copyright>().unwrap();
+        let license_para = copyright.iter_licenses().next().unwrap();
+        let via_method = license_para.license();
+        let via_from: crate::License = license_para.into();
+        assert_eq!(via_from, via_method);
+        assert_eq!(
+            via_from,
+            crate::License::Named(
+                "GPL-2+".to_string(),
+                "First paragraph.\n\nSecond paragraph.".to_string(),
+            )
+        );
+    }
+
+    #[test]
     fn test_iter_licenses_excludes_header() {
         // Test that iter_licenses does not include the header paragraph even if it has a License field
         let s = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
@@ -1520,6 +1579,33 @@ License: GPL-3+
              Files: *\n\
              Copyright: 2024 Test Author\n\
              License: MIT\n Permission is hereby granted...\n"
+        );
+    }
+
+    #[test]
+    fn test_add_files_with_multi_paragraph_license_text() {
+        // add_files must encode blank lines in the license body as `.`
+        // paragraph markers, matching add_license and set_license.
+        let mut copyright = super::Copyright::new();
+        let license = crate::License::Named(
+            "GPL-2+".to_string(),
+            "First paragraph.\n\nSecond paragraph.".to_string(),
+        );
+        copyright.add_files(&["*"], &["2024 Test Author"], &license);
+
+        assert_eq!(
+            copyright.to_string(),
+            "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\n\
+             Files: *\n\
+             Copyright: 2024 Test Author\n\
+             License: GPL-2+\n First paragraph.\n .\n Second paragraph.\n"
+        );
+
+        // And the round trip back through license() must decode again.
+        let files: Vec<_> = copyright.iter_files().collect();
+        assert_eq!(
+            files[0].license().unwrap().text(),
+            Some("First paragraph.\n\nSecond paragraph.")
         );
     }
 
