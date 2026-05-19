@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["deb822-lossless", "deb822-derive", "deb822-fast", "debian-control", "debian-copyright", "dep3", "apt-sources", "debian-watch", "lintian-overrides", "debian-changelog"]
+members = ["debversion", "deb822-lossless", "deb822-derive", "deb822-fast", "debian-control", "debian-copyright", "dep3", "apt-sources", "debian-watch", "lintian-overrides", "debian-changelog"]
 
 [workspace.package]
 repository = "https://github.com/jelmer/debian-parsers"

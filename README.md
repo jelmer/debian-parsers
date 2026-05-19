@@ -3,6 +3,8 @@
 This repository contains parsers and editors for various Debian packaging
 files, implement in Rust.
 
+* `debversion`: A parser for Debian version strings as defined in Debian policy, with support for version comparison and sorting.
+
 ## Deb822-based parsers
 
 The core two deb822 parsers are :
