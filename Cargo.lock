@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "debian-copyright"
-version = "0.1.49"
+version = "0.1.50"
 dependencies = [
  "deb822-fast",
  "deb822-lossless",
