@@ -696,6 +696,13 @@ fn parse(text: &str) -> Parse<ChangeLog> {
                     Some(COMMENT) => {
                         self.bump();
                     }
+                    Some(IDENTIFIER) if self.starts_old_entries() => {
+                        // Old-style changelog entries (pre-1.0 format) make up
+                        // the rest of the file. Preserve them verbatim instead
+                        // of erroring on every line.
+                        self.parse_old_entries();
+                        break;
+                    }
                     Some(IDENTIFIER) => {
                         self.parse_entry();
                     }
@@ -710,6 +717,44 @@ fn parse(text: &str) -> Parse<ChangeLog> {
 
             // Turn the builder into a GreenNode
             Parse::new(self.builder.finish(), self.errors)
+        }
+
+        /// Determine whether the upcoming line is an old-style changelog
+        /// header, i.e. one that predates the current `package (version)
+        /// distribution; urgency=...` syntax.
+        ///
+        /// A modern header always contains a `VERSION` token. An old-style
+        /// header (such as `1.9.16alpha10-1:` or `Old Changelog:`) does not,
+        /// and instead carries an `ERROR` token (typically a stray `:`).
+        fn starts_old_entries(&self) -> bool {
+            let mut saw_error = false;
+            // Tokens are stored in reverse order; walk this line back to front.
+            for (kind, _) in self.tokens.iter().rev() {
+                match kind {
+                    NEWLINE => break,
+                    VERSION => return false,
+                    ERROR => saw_error = true,
+                    _ => {}
+                }
+            }
+            saw_error
+        }
+
+        /// Consume the remainder of the input as a single `OLD_ENTRIES` node,
+        /// without recording parse errors.
+        ///
+        /// Old-style entries are deliberately not parsed into structured
+        /// `Entry` nodes. The pre-1.0 formats are too heterogeneous (GNU-style
+        /// dates, `package version Debian rev`, `Changes from version X to Y`,
+        /// bare `version:` headers) to extract reliable version and maintainer
+        /// data from. dpkg's own parser does the same, storing them verbatim as
+        /// the "unparsed tail" once it hits the first old-style header.
+        fn parse_old_entries(&mut self) {
+            self.builder.start_node(OLD_ENTRIES.into());
+            while self.current().is_some() {
+                self.bump();
+            }
+            self.builder.finish_node();
         }
         /// Advance one token, adding it to the current branch of the tree builder.
         fn bump(&mut self) {
@@ -1191,6 +1236,20 @@ impl ChangeLog {
     #[deprecated(since = "0.2.0", note = "use `iter` instead")]
     pub fn entries(&self) -> impl Iterator<Item = Entry> + '_ {
         self.iter()
+    }
+
+    /// Returns the verbatim text of any trailing old-style changelog entries.
+    ///
+    /// Long-lived packages often end their changelog with pre-1.0 entries in a
+    /// format that predates the current syntax. These are preserved verbatim
+    /// rather than parsed into structured [`Entry`] values, so they do not
+    /// appear in [`Self::iter`]. Returns `None` if the changelog has no such
+    /// trailing section.
+    pub fn old_entries_text(&self) -> Option<String> {
+        self.0
+            .children()
+            .find(|it| it.kind() == OLD_ENTRIES)
+            .map(|node| node.text().to_string())
     }
 
     /// Find the entry that contains the given text position.
@@ -4226,6 +4285,71 @@ baz (1.0-1) unstable; urgency=low
         assert_eq!(entries[2].package(), Some("baz".to_string()));
         let identity = entries[2].get_maintainer_identity().unwrap();
         assert_eq!(identity.name, "Bob");
+    }
+
+    #[test]
+    fn test_parse_old_style_trailing_entries() {
+        // Many long-lived packages (e.g. samba) end their changelog with
+        // pre-1.0 "old-style" entries: a bare `version:` header followed by
+        // indented free-form text. dpkg and python-debian tolerate these; the
+        // parser must not error on them, and must round-trip them verbatim.
+        let input = concat!(
+            "samba (1.9.16p9-1) unstable; urgency=low\n",
+            "\n",
+            "  * upgraded to new upstream version\n",
+            "\n",
+            " -- Klee Dienes <klee@example.com>  Sat, 26 Oct 1996 21:38:20 -0700\n",
+            "\n",
+            "1.9.16alpha10-1:\n",
+            " 960714\n",
+            " * Removed Package_Revision from control file.\n",
+            " * Uses update-inetd now.\n",
+            "\n",
+            "1.9.15p4-1:\n",
+            " 951128\n",
+            " * Upgraded to latest upstream version.\n",
+        );
+        let parsed = ChangeLog::parse(input);
+        assert_eq!(parsed.errors(), Vec::<&str>::new());
+
+        let changelog: ChangeLog = parsed.tree();
+        let entries: Vec<_> = changelog.iter().collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].package(), Some("samba".to_string()));
+        assert_eq!(
+            entries[0].version().map(|v| v.to_string()),
+            Some("1.9.16p9-1".to_string())
+        );
+
+        // The old-style entries are preserved verbatim.
+        assert_eq!(changelog.to_string(), input);
+
+        // ... and are retrievable via old_entries_text().
+        assert_eq!(
+            changelog.old_entries_text(),
+            Some(
+                concat!(
+                    "1.9.16alpha10-1:\n",
+                    " 960714\n",
+                    " * Removed Package_Revision from control file.\n",
+                    " * Uses update-inetd now.\n",
+                    "\n",
+                    "1.9.15p4-1:\n",
+                    " 951128\n",
+                    " * Upgraded to latest upstream version.\n",
+                )
+                .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_old_entries_text_absent_for_modern_changelog() {
+        let changelog: ChangeLog =
+            "foo (1.0-1) unstable; urgency=low\n\n  * Change\n\n -- Maint <m@example.com>  Mon, 04 Sep 2023 18:13:45 -0500\n"
+                .parse()
+                .unwrap();
+        assert_eq!(changelog.old_entries_text(), None);
     }
 
     #[test]
