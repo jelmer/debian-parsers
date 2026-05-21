@@ -693,10 +693,10 @@ pub enum SyntaxKind {
     MAINTAINER,
     EMAIL,
 
-    /// Trailing old-style changelog entries, in a pre-1.0 format that predates
-    /// the current changelog syntax. These are preserved verbatim rather than
-    /// parsed into structured entries.
-    OLD_ENTRIES,
+    /// A single old-style changelog entry, in a pre-1.0 format that predates
+    /// the current changelog syntax. Its header and body are not broken down
+    /// into structured tokens, but each such entry is a node of its own.
+    OLD_ENTRY,
 }
 
 /// Convert our `SyntaxKind` into the rowan `SyntaxKind`.
