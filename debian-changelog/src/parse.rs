@@ -696,10 +696,10 @@ fn parse(text: &str) -> Parse<ChangeLog> {
                     Some(COMMENT) => {
                         self.bump();
                     }
-                    Some(IDENTIFIER) if self.starts_old_entries() => {
+                    Some(IDENTIFIER) if self.line_starts_old_header() => {
                         // Old-style changelog entries (pre-1.0 format) make up
-                        // the rest of the file. Preserve them verbatim instead
-                        // of erroring on every line.
+                        // the rest of the file. Parse each one into its own
+                        // OLD_ENTRY node instead of erroring on every line.
                         self.parse_old_entries();
                         break;
                     }
@@ -719,17 +719,29 @@ fn parse(text: &str) -> Parse<ChangeLog> {
             Parse::new(self.builder.finish(), self.errors)
         }
 
-        /// Determine whether the upcoming line is an old-style changelog
-        /// header, i.e. one that predates the current `package (version)
-        /// distribution; urgency=...` syntax.
+        /// Determine whether the next unconsumed line is an old-style
+        /// changelog header, i.e. one that predates the current `package
+        /// (version) distribution; urgency=...` syntax.
         ///
-        /// A modern header always contains a `VERSION` token. An old-style
-        /// header (such as `1.9.16alpha10-1:` or `Old Changelog:`) does not,
-        /// and instead carries an `ERROR` token (typically a stray `:`).
-        fn starts_old_entries(&self) -> bool {
+        /// A modern header always contains a `VERSION` token and starts with
+        /// an `IDENTIFIER` in the first column. An old-style header (such as
+        /// `1.9.16alpha10-1:` or `Old Changelog:`) starts with an `IDENTIFIER`
+        /// too, but has no `VERSION`; it instead carries an `ERROR` token
+        /// (typically a stray `:`). Indented lines (the body of an entry) and
+        /// blank lines are not headers.
+        fn line_starts_old_header(&self) -> bool {
+            // Tokens are stored in reverse order; walk this line front to back
+            // by iterating the tail of the vec in reverse.
+            let mut line = self.tokens.iter().rev();
+            match line.next() {
+                // A header line must begin in the first column with an
+                // identifier; an INDENT/WHITESPACE start marks a body line,
+                // and a NEWLINE start marks a blank line.
+                Some((IDENTIFIER, _)) => {}
+                _ => return false,
+            }
             let mut saw_error = false;
-            // Tokens are stored in reverse order; walk this line back to front.
-            for (kind, _) in self.tokens.iter().rev() {
+            for (kind, _) in line {
                 match kind {
                     NEWLINE => break,
                     VERSION => return false,
@@ -740,20 +752,39 @@ fn parse(text: &str) -> Parse<ChangeLog> {
             saw_error
         }
 
-        /// Consume the remainder of the input as a single `OLD_ENTRIES` node,
-        /// without recording parse errors.
+        /// Parse the remainder of the input as a sequence of `OLD_ENTRY`
+        /// nodes, one per old-style entry, without recording parse errors.
         ///
-        /// Old-style entries are deliberately not parsed into structured
-        /// `Entry` nodes. The pre-1.0 formats are too heterogeneous (GNU-style
-        /// dates, `package version Debian rev`, `Changes from version X to Y`,
-        /// bare `version:` headers) to extract reliable version and maintainer
-        /// data from. dpkg's own parser does the same, storing them verbatim as
-        /// the "unparsed tail" once it hits the first old-style header.
+        /// The pre-1.0 formats are too heterogeneous (GNU-style dates,
+        /// `package version Debian rev`, `Changes from version X to Y`, bare
+        /// `version:` headers) to break their headers and bodies down into
+        /// structured tokens. Instead, each entry runs from one old-style
+        /// header line up to (but not including) the next, and is kept as a
+        /// node of its own so callers can iterate over individual entries.
         fn parse_old_entries(&mut self) {
-            self.builder.start_node(OLD_ENTRIES.into());
             while self.current().is_some() {
+                self.parse_old_entry();
+            }
+        }
+
+        /// Parse a single old-style entry: its header line followed by every
+        /// line up to the next old-style header line or end of input.
+        fn parse_old_entry(&mut self) {
+            self.builder.start_node(OLD_ENTRY.into());
+
+            // Consume the header line, including its trailing newline.
+            while let Some(kind) = self.current() {
+                self.bump();
+                if kind == NEWLINE {
+                    break;
+                }
+            }
+
+            // Consume body lines until the next old-style header or EOF.
+            while self.current().is_some() && !self.line_starts_old_header() {
                 self.bump();
             }
+
             self.builder.finish_node();
         }
         /// Advance one token, adding it to the current branch of the tree builder.
@@ -895,7 +926,6 @@ macro_rules! ast_node {
 }
 
 ast_node!(ChangeLog, ROOT);
-ast_node!(Entry, ENTRY);
 ast_node!(EntryHeader, ENTRY_HEADER);
 ast_node!(EntryBody, ENTRY_BODY);
 ast_node!(EntryFooter, ENTRY_FOOTER);
@@ -1238,18 +1268,34 @@ impl ChangeLog {
         self.iter()
     }
 
+    /// Returns an iterator over the old-style entries in the changelog file.
+    ///
+    /// Long-lived packages often end their changelog with pre-1.0 entries in a
+    /// format that predates the current syntax. Each is yielded as an [`Entry`]
+    /// for which [`Entry::is_old_style`] is true. Such entries are also
+    /// returned by [`Self::iter`]; this method is a convenience for callers
+    /// that only care about the old-style ones.
+    pub fn old_entries(&self) -> impl Iterator<Item = Entry> + '_ {
+        self.iter().filter(Entry::is_old_style)
+    }
+
     /// Returns the verbatim text of any trailing old-style changelog entries.
     ///
     /// Long-lived packages often end their changelog with pre-1.0 entries in a
-    /// format that predates the current syntax. These are preserved verbatim
-    /// rather than parsed into structured [`Entry`] values, so they do not
-    /// appear in [`Self::iter`]. Returns `None` if the changelog has no such
-    /// trailing section.
+    /// format that predates the current syntax. Returns `None` if the changelog
+    /// has no such trailing section.
     pub fn old_entries_text(&self) -> Option<String> {
-        self.0
+        let text: String = self
+            .0
             .children()
-            .find(|it| it.kind() == OLD_ENTRIES)
+            .filter(|it| it.kind() == OLD_ENTRY)
             .map(|node| node.text().to_string())
+            .collect();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
     }
 
     /// Find the entry that contains the given text position.
@@ -2006,7 +2052,82 @@ impl Maintainer {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+/// A single changelog entry.
+///
+/// This is normally a modern `package (version) distribution; ...` entry, but
+/// it may also be an old-style entry in a pre-1.0 format that predates the
+/// current syntax. For old-style entries the header and body are not broken
+/// down into structured tokens, so accessors such as [`Entry::header`],
+/// [`Entry::version`] and [`Entry::maintainer`] return `None`; use
+/// [`Entry::is_old_style`] to detect them and [`Entry::to_string`] to access
+/// their verbatim text.
+pub struct Entry(SyntaxNode);
+
+impl AstNode for Entry {
+    type Language = Lang;
+
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == ENTRY || kind == OLD_ENTRY
+    }
+
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        if Self::can_cast(syntax.kind()) {
+            Some(Self(syntax))
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &SyntaxNode {
+        &self.0
+    }
+}
+
 impl Entry {
+    #[allow(dead_code)]
+    fn replace_root(&mut self, new_root: SyntaxNode) {
+        self.0 = Self::cast(new_root).unwrap().0;
+    }
+
+    /// Get the line number (0-indexed) where this entry starts.
+    pub fn line(&self) -> usize {
+        line_col_at_offset(&self.0, self.0.text_range().start()).0
+    }
+
+    /// Get the column number (0-indexed, in bytes) where this entry starts.
+    pub fn column(&self) -> usize {
+        line_col_at_offset(&self.0, self.0.text_range().start()).1
+    }
+
+    /// Get both line and column (0-indexed) where this entry starts.
+    ///
+    /// Returns (line, column) where column is measured in bytes from the start
+    /// of the line.
+    pub fn line_col(&self) -> (usize, usize) {
+        line_col_at_offset(&self.0, self.0.text_range().start())
+    }
+}
+
+impl std::fmt::Display for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(self.0.text().to_string().as_str())
+    }
+}
+
+impl Entry {
+    /// Returns whether this is an old-style entry in a pre-1.0 format that
+    /// predates the current changelog syntax.
+    ///
+    /// Old-style entries are kept verbatim: their header and body are not
+    /// broken down into structured tokens, so the structured accessors
+    /// ([`Entry::header`], [`Entry::version`], [`Entry::maintainer`], etc.)
+    /// return `None`. Use [`Entry::to_string`] to access their text.
+    pub fn is_old_style(&self) -> bool {
+        self.0.kind() == OLD_ENTRY
+    }
+
     /// Returns the header AST node of the entry.
     pub fn header(&self) -> Option<EntryHeader> {
         self.0.children().find_map(EntryHeader::cast)
@@ -4313,18 +4434,51 @@ baz (1.0-1) unstable; urgency=low
         assert_eq!(parsed.errors(), Vec::<&str>::new());
 
         let changelog: ChangeLog = parsed.tree();
+
+        // The modern entry and each old-style entry are returned by iter().
         let entries: Vec<_> = changelog.iter().collect();
-        assert_eq!(entries.len(), 1);
+        assert_eq!(entries.len(), 3);
+
+        assert!(!entries[0].is_old_style());
         assert_eq!(entries[0].package(), Some("samba".to_string()));
         assert_eq!(
             entries[0].version().map(|v| v.to_string()),
             Some("1.9.16p9-1".to_string())
         );
 
-        // The old-style entries are preserved verbatim.
+        // Old-style entries are split per-entry but kept verbatim, so their
+        // structured accessors return None.
+        assert!(entries[1].is_old_style());
+        assert_eq!(entries[1].package(), None);
+        assert_eq!(entries[1].version(), None);
+        assert_eq!(
+            entries[1].to_string(),
+            concat!(
+                "1.9.16alpha10-1:\n",
+                " 960714\n",
+                " * Removed Package_Revision from control file.\n",
+                " * Uses update-inetd now.\n",
+                "\n",
+            )
+        );
+
+        assert!(entries[2].is_old_style());
+        assert_eq!(
+            entries[2].to_string(),
+            concat!(
+                "1.9.15p4-1:\n",
+                " 951128\n",
+                " * Upgraded to latest upstream version.\n",
+            )
+        );
+
+        // The old_entries() iterator yields just the old-style entries.
+        assert_eq!(changelog.old_entries().count(), 2);
+
+        // The whole file round-trips verbatim.
         assert_eq!(changelog.to_string(), input);
 
-        // ... and are retrievable via old_entries_text().
+        // ... and the old-style section is retrievable via old_entries_text().
         assert_eq!(
             changelog.old_entries_text(),
             Some(
@@ -4341,6 +4495,56 @@ baz (1.0-1) unstable; urgency=low
                 .to_string()
             )
         );
+    }
+
+    #[test]
+    fn test_parse_old_style_gnu_date_entries() {
+        // GNU-style old entries use an expanded-date header line and a
+        // tab-indented body. Each date line starts a new old-style entry.
+        let input = concat!(
+            "samba (2.0.0-1) unstable; urgency=low\n",
+            "\n",
+            "  * new upstream\n",
+            "\n",
+            " -- A B <a@b.com>  Sat, 26 Oct 1996 21:38:20 -0700\n",
+            "\n",
+            "Old Changelog:\n",
+            "\n",
+            "Wed Oct 26 21:38:20 PDT 1996 Klee Dienes <klee@example.com>\n",
+            "\n",
+            "\t* did stuff\n",
+            "\n",
+            "Mon Jan 1 1996 Someone Else <other@example.com>\n",
+            "\n",
+            "\t* did other stuff\n",
+        );
+        let parsed = ChangeLog::parse(input);
+        assert_eq!(parsed.errors(), Vec::<&str>::new());
+
+        let changelog: ChangeLog = parsed.tree();
+        let entries: Vec<_> = changelog.iter().collect();
+        assert_eq!(entries.len(), 4);
+
+        assert!(!entries[0].is_old_style());
+        assert_eq!(entries[0].package(), Some("samba".to_string()));
+
+        // The "Old Changelog:" marker line is itself an old-style entry.
+        assert!(entries[1].is_old_style());
+        assert_eq!(entries[1].to_string(), "Old Changelog:\n\n");
+
+        assert!(entries[2].is_old_style());
+        assert_eq!(
+            entries[2].to_string(),
+            "Wed Oct 26 21:38:20 PDT 1996 Klee Dienes <klee@example.com>\n\n\t* did stuff\n\n"
+        );
+
+        assert!(entries[3].is_old_style());
+        assert_eq!(
+            entries[3].to_string(),
+            "Mon Jan 1 1996 Someone Else <other@example.com>\n\n\t* did other stuff\n"
+        );
+
+        assert_eq!(changelog.to_string(), input);
     }
 
     #[test]
