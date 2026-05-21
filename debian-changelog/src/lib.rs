@@ -692,6 +692,11 @@ pub enum SyntaxKind {
     TIMESTAMP,
     MAINTAINER,
     EMAIL,
+
+    /// Trailing old-style changelog entries, in a pre-1.0 format that predates
+    /// the current changelog syntax. These are preserved verbatim rather than
+    /// parsed into structured entries.
+    OLD_ENTRIES,
 }
 
 /// Convert our `SyntaxKind` into the rowan `SyntaxKind`.
