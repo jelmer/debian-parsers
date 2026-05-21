@@ -2570,6 +2570,18 @@ impl Entry {
         }
     }
 
+    /// Return whether this entry is a team upload.
+    ///
+    /// Team uploads are detected by a "Team upload" marker in the first
+    /// bullet point of the entry's changes. They are numbered (and tagged)
+    /// separately from regular maintainer uploads.
+    pub fn is_team_upload(&self) -> bool {
+        self.change_lines()
+            .find(|l| l.trim_start().starts_with('*'))
+            .map(|line| lazy_regex::regex_is_match!(r"(?i)team upload", &line))
+            .unwrap_or(false)
+    }
+
     /// Iterator over changes in this entry grouped by author.
     ///
     /// Returns a vector of tuples (author_name, line_numbers, change_lines)
@@ -3012,6 +3024,34 @@ breezy (3.3.3-2) unstable; urgency=medium
 "###,
             cl.to_string()
         );
+    }
+
+    #[test]
+    fn test_is_team_upload() {
+        let team = ChangeLog::read(
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * Team upload.
+  * New upstream release.
+
+ -- Jelmer Vernooij <jelmer@debian.org>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(team.iter().next().unwrap().is_team_upload());
+
+        let regular = ChangeLog::read(
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jelmer Vernooij <jelmer@debian.org>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(!regular.iter().next().unwrap().is_team_upload());
     }
 
     #[test]
