@@ -667,6 +667,18 @@ impl Source {
         self.set("Maintainer", maintainer);
     }
 
+    /// Return whether this package is maintained by the Debian QA team.
+    ///
+    /// Orphaned packages have their `Maintainer` field set to
+    /// `Debian QA Group <packages@qa.debian.org>`.
+    pub fn is_qa_package(&self) -> bool {
+        self.maintainer()
+            .as_deref()
+            .and_then(|m| crate::parse_identity(m).ok())
+            .map(|(_, email)| email.eq_ignore_ascii_case("packages@qa.debian.org"))
+            .unwrap_or(false)
+    }
+
     /// The build dependencies of the package.
     pub fn build_depends(&self) -> Option<Relations> {
         self.paragraph
@@ -1859,6 +1871,23 @@ Build-Depends: foo, bar (>= 1.0.0)
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_provides(Some(&relations));
         assert!(binary.provides().is_some());
+    }
+
+    #[test]
+    fn test_source_is_qa_package() {
+        let control: Control = "Source: foo\n\n".parse().unwrap();
+        assert!(!control.source().unwrap().is_qa_package());
+
+        let control: Control = "Source: foo\nMaintainer: Jane Packager <jane@example.com>\n\n"
+            .parse()
+            .unwrap();
+        assert!(!control.source().unwrap().is_qa_package());
+
+        let control: Control =
+            "Source: foo\nMaintainer: Debian QA Group <packages@qa.debian.org>\n\n"
+                .parse()
+                .unwrap();
+        assert!(control.source().unwrap().is_qa_package());
     }
 
     #[test]
