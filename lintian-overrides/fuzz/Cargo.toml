@@ -1,0 +1,23 @@
+[package]
+name = "lintian-overrides-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.lintian-overrides]
+path = ".."
+
+[[bin]]
+name = "parse_overrides"
+path = "fuzz_targets/parse_overrides.rs"
+test = false
+doc = false
+bench = false
