@@ -477,6 +477,26 @@ impl PackageSpec {
     }
 }
 
+/// Split `s` into alternating runs of non-whitespace and whitespace
+/// characters. Concatenating the returned slices reproduces `s` exactly.
+fn split_runs(s: &str) -> Vec<&str> {
+    let mut runs = Vec::new();
+    let mut start = 0;
+    let mut in_ws = s.starts_with(char::is_whitespace);
+    for (i, c) in s.char_indices() {
+        let here_ws = c.is_whitespace();
+        if here_ws != in_ws {
+            runs.push(&s[start..i]);
+            start = i;
+            in_ws = here_ws;
+        }
+    }
+    if start < s.len() {
+        runs.push(&s[start..]);
+    }
+    runs
+}
+
 /// Parse a lintian-overrides file
 fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<String>) {
     let mut builder = GreenNodeBuilder::new();
@@ -484,15 +504,18 @@ fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<String>) {
 
     builder.start_node(ROOT.into());
 
-    for line in text.lines() {
+    // split_inclusive keeps the trailing '\n' on each line if it was present,
+    // so we only emit a NEWLINE token when the source actually had one and
+    // round-trip back to exactly the input text.
+    for raw_line in text.split_inclusive('\n') {
+        let (line, has_newline) = match raw_line.strip_suffix('\n') {
+            Some(stripped) => (stripped, true),
+            None => (raw_line, false),
+        };
         parse_line(&mut builder, line, &mut errors);
-        builder.token(NEWLINE.into(), "\n");
-    }
-
-    // Handle case where file doesn't end with newline
-    if !text.ends_with('\n') && !text.is_empty() {
-        // Remove the extra newline we added
-        // This is a bit hacky, but rowan doesn't provide a way to remove the last token
+        if has_newline {
+            builder.token(NEWLINE.into(), "\n");
+        }
     }
 
     builder.finish_node();
@@ -571,37 +594,31 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
         builder.start_node(PACKAGE_SPEC.into());
 
         let package_spec_text = &trimmed_start[current_start..colon_pos];
-        let spec_parts: Vec<&str> = package_spec_text.split_whitespace().collect();
 
-        // Parse the package spec components
-        // Valid formats:
-        // - "source:" or "binary:" (just type, no package name)
-        // - "package-name:" (just package name, no type)
-        // - "package-name source:" or "package-name binary:" (name then type)
-        // - "source package-name:" or "binary package-name:" (type then name)
-        match spec_parts.len() {
-            1 => {
-                // Single word - could be package name or type
-                builder.token(PACKAGE_NAME.into(), spec_parts[0]);
-            }
-            2 => {
-                // Two words - need to figure out which is name and which is type
-                if spec_parts[0] == "source" || spec_parts[0] == "binary" {
-                    // Format: "source package-name:" or "binary package-name:"
-                    builder.token(PACKAGE_TYPE.into(), spec_parts[0]);
-                    builder.token(WHITESPACE.into(), " ");
-                    builder.token(PACKAGE_NAME.into(), spec_parts[1]);
-                } else {
-                    // Format: "package-name source:" or "package-name binary:"
-                    builder.token(PACKAGE_NAME.into(), spec_parts[0]);
-                    builder.token(WHITESPACE.into(), " ");
-                    builder.token(PACKAGE_TYPE.into(), spec_parts[1]);
-                }
-            }
-            _ => {
-                // Shouldn't happen given our validation above, but handle it
-                builder.token(PACKAGE_NAME.into(), package_spec_text);
-            }
+        // Walk the spec text run by run so we can emit each word and the
+        // whitespace between them as separate tokens (the previous code
+        // hard-coded a single space and dropped any other interior or
+        // trailing whitespace). Valid spec layouts:
+        //   "package-name", "source", "binary",
+        //   "package-name source", "package-name binary",
+        //   "source package-name", "binary package-name".
+        // In a two-word spec the "source"/"binary" word is the type and the
+        // other is the name; otherwise everything is a name.
+        let runs = split_runs(package_spec_text);
+        let two_words = runs
+            .iter()
+            .filter(|r| !r.starts_with(char::is_whitespace))
+            .count()
+            == 2;
+        for run in runs {
+            let kind = if run.starts_with(char::is_whitespace) {
+                WHITESPACE
+            } else if two_words && (run == "source" || run == "binary") {
+                PACKAGE_TYPE
+            } else {
+                PACKAGE_NAME
+            };
+            builder.token(kind.into(), run);
         }
 
         builder.token(COLON.into(), ":");
@@ -619,32 +636,33 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
         }
     }
 
-    // Now parse the rest as tag and info
+    // The remainder is: [whitespace] tag [whitespace info-spanning-the-rest].
+    // Info may itself contain whitespace, so we don't tokenise inside it —
+    // it's a single INFO token from its first byte to the end of `rest`.
     let rest = &trimmed_start[current_start..];
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-
-    if !parts.is_empty() {
-        // First part is the tag
-        builder.token(TAG.into(), parts[0]);
-
-        // Rest is info
-        if parts.len() > 1 {
-            // Find where the tag ends in the original string
-            let tag_end = rest.find(parts[0]).unwrap() + parts[0].len();
-            let after_tag = &rest[tag_end..];
-
-            // Add whitespace between tag and info
-            let info_start = after_tag.len() - after_tag.trim_start().len();
-            if info_start > 0 {
-                builder.token(WHITESPACE.into(), &after_tag[..info_start]);
-            }
-
-            // Add the info as a single token
-            let info = after_tag.trim_start();
-            if !info.is_empty() {
-                builder.token(INFO.into(), info);
-            }
-        }
+    let ws_end = rest.len() - rest.trim_start().len();
+    if ws_end > 0 {
+        builder.token(WHITESPACE.into(), &rest[..ws_end]);
+    }
+    let after_ws = &rest[ws_end..];
+    if after_ws.is_empty() {
+        builder.finish_node();
+        return;
+    }
+    let tag_end = after_ws.find(char::is_whitespace).unwrap_or(after_ws.len());
+    builder.token(TAG.into(), &after_ws[..tag_end]);
+    let after_tag = &after_ws[tag_end..];
+    if after_tag.is_empty() {
+        builder.finish_node();
+        return;
+    }
+    let info_start = after_tag.len() - after_tag.trim_start().len();
+    if info_start > 0 {
+        builder.token(WHITESPACE.into(), &after_tag[..info_start]);
+    }
+    let info = &after_tag[info_start..];
+    if !info.is_empty() {
+        builder.token(INFO.into(), info);
     }
 
     builder.finish_node();
@@ -1196,5 +1214,32 @@ mod tests {
             result, expected,
             "Newlines should be preserved with package specs and info"
         );
+    }
+
+    #[test]
+    fn test_parse_round_trip_without_trailing_newline() {
+        // Regression: the parser used to append a NEWLINE token for every
+        // line including non-newline-terminated trailers, so the round-trip
+        // gained an extra '\n'.
+        for input in [
+            "",
+            "\x0b",
+            "tag info",
+            "tag info\n",
+            "tag info\ntag2 info\n",
+            "tag info\ntag2 info",
+            // Tag alone, with trailing whitespace that must round-trip.
+            " \x12  ",
+            "tag  ",
+            "tag\t\t",
+            // Package-spec text with unusual interior whitespace that the
+            // previous hard-coded " " between words used to mangle.
+            "0]\x0b:",
+            "foo\tsource:",
+            "binary  foo:",
+        ] {
+            let parsed = LintianOverrides::parse(input).tree();
+            assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
+        }
     }
 }

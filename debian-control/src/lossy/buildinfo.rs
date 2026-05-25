@@ -17,7 +17,9 @@ fn deserialize_env(s: &str) -> Result<HashMap<String, String>, String> {
         }
         let (key, value) = match line.split_once("=") {
             Some((key, value)) => {
-                if value.starts_with('"') && value.ends_with('"') {
+                // Strip surrounding double quotes, but only when there are two
+                // of them: a lone `"` has len()==1 and would panic on 1..0.
+                if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
                     let value = value[1..value.len() - 1].to_string();
                     (key, value)
                 } else {
@@ -158,5 +160,15 @@ mod tests {
         let buildinfo = Buildinfo::from_str(input).unwrap();
 
         assert_eq!(buildinfo.format, "1.0");
+    }
+
+    #[test]
+    fn test_environment_value_is_lone_quote() {
+        // Regression: a value of just `"` used to panic in deserialize_env
+        // because it tried to slice 1..0 after detecting "starts/ends with
+        // double quote" on a one-byte string.
+        let line = "FOO=\"";
+        let env = super::deserialize_env(line).unwrap();
+        assert_eq!(env.get("FOO"), Some(&"\"".to_string()));
     }
 }
