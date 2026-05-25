@@ -6,12 +6,20 @@ use libfuzzer_sys::fuzz_target;
 use std::str::FromStr;
 
 fuzz_target!(|s: &str| {
-    // Fuzz main control file parser
-    let _ = Control::from_str(s);
+    if let Ok(control) = Control::from_str(s) {
+        // Touch every field so accessor logic gets exercised.
+        let _ = &control.source.name;
+        let _ = &control.source.maintainer;
+        for binary in &control.binaries {
+            let _ = &binary.name;
+            let _ = &binary.architecture;
+        }
+        // Display impl must reproduce the input *as accepted by the parser*;
+        // we can't claim equality with `s` since lossy parsing may drop
+        // whitespace/comments. Just make sure it doesn't panic.
+        let _ = control.to_string();
+    }
 
-    // Fuzz apt package parser
     let _ = Package::from_str(s);
-
-    // Fuzz apt source parser
     let _ = Source::from_str(s);
 });

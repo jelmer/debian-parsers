@@ -8,12 +8,20 @@ use std::str::FromStr;
 use dep3::lossless::PatchHeader as LosslessPatchHeader;
 
 fuzz_target!(|s: &str| {
-    // Fuzz lossy patch header parser
+    // Lossy parser: must not panic.
     let _ = LossyPatchHeader::from_str(s);
 
     #[cfg(feature = "lossless")]
     {
-        // Fuzz lossless patch header parser
-        let _ = LosslessPatchHeader::from_str(s);
+        // Lossless parser: walk accessors and assert round-trip.
+        if let Ok(header) = LosslessPatchHeader::from_str(s) {
+            let _ = header.description();
+            let _ = header.origin();
+            let _ = header.forwarded();
+            for bug in header.bugs() {
+                let _ = bug;
+            }
+            assert_eq!(header.to_string(), s);
+        }
     }
 });
