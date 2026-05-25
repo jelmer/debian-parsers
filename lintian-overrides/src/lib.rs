@@ -484,15 +484,18 @@ fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<String>) {
 
     builder.start_node(ROOT.into());
 
-    for line in text.lines() {
+    // split_inclusive keeps the trailing '\n' on each line if it was present,
+    // so we only emit a NEWLINE token when the source actually had one and
+    // round-trip back to exactly the input text.
+    for raw_line in text.split_inclusive('\n') {
+        let (line, has_newline) = match raw_line.strip_suffix('\n') {
+            Some(stripped) => (stripped, true),
+            None => (raw_line, false),
+        };
         parse_line(&mut builder, line, &mut errors);
-        builder.token(NEWLINE.into(), "\n");
-    }
-
-    // Handle case where file doesn't end with newline
-    if !text.ends_with('\n') && !text.is_empty() {
-        // Remove the extra newline we added
-        // This is a bit hacky, but rowan doesn't provide a way to remove the last token
+        if has_newline {
+            builder.token(NEWLINE.into(), "\n");
+        }
     }
 
     builder.finish_node();
@@ -1196,5 +1199,23 @@ mod tests {
             result, expected,
             "Newlines should be preserved with package specs and info"
         );
+    }
+
+    #[test]
+    fn test_parse_round_trip_without_trailing_newline() {
+        // Regression: the parser used to append a NEWLINE token for every
+        // line including non-newline-terminated trailers, so the round-trip
+        // gained an extra '\n'.
+        for input in [
+            "",
+            "\x0b",
+            "tag info",
+            "tag info\n",
+            "tag info\ntag2 info\n",
+            "tag info\ntag2 info",
+        ] {
+            let parsed = LintianOverrides::parse(input).tree();
+            assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
+        }
     }
 }
