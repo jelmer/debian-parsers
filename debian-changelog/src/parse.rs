@@ -707,8 +707,8 @@ fn parse(text: &str) -> Parse<ChangeLog> {
                         self.parse_entry();
                     }
                     t => {
+                        // `error()` already advances past the offending token.
                         self.error(format!("unexpected token {:?}", t));
-                        self.bump();
                     }
                 }
             }
@@ -4804,5 +4804,20 @@ breezy (3.3.4-1) unstable; urgency=low
         entry.set_package("bar".to_string());
 
         assert!(!cl.tree_eq(&snap));
+    }
+
+    #[test]
+    fn test_parse_does_not_panic_on_unexpected_tokens() {
+        // Regression: the top-level fallthrough used to call bump() *after*
+        // error() had already consumed the offending token, draining the
+        // token stack and panicking on the next bump.
+        for input in [
+            "\x0e",
+            "\x0e=*",
+            ")",
+            "\n\n`",
+        ] {
+            let _ = ChangeLog::parse_relaxed(input);
+        }
     }
 }
