@@ -799,8 +799,11 @@ fn parse(text: &str) -> Parse<ChangeLog> {
         }
 
         fn next(&self) -> Option<SyntaxKind> {
+            // Tokens are stored reversed; the second-to-last entry is the
+            // token *after* the current one. Use checked_sub so debug builds
+            // don't panic when fewer than two tokens remain.
             self.tokens
-                .get(self.tokens.len() - 2)
+                .get(self.tokens.len().checked_sub(2)?)
                 .map(|(kind, _)| *kind)
         }
 
@@ -4810,14 +4813,19 @@ breezy (3.3.4-1) unstable; urgency=low
     fn test_parse_does_not_panic_on_unexpected_tokens() {
         // Regression: the top-level fallthrough used to call bump() *after*
         // error() had already consumed the offending token, draining the
-        // token stack and panicking on the next bump.
+        // token stack and panicking on the next bump. Also covers a
+        // separate `tokens.len() - 2` underflow in `next()` when fewer
+        // than two tokens remain. Both bugs hit `parse_relaxed` and the
+        // strict `FromStr` path equally.
         for input in [
             "\x0e",
             "\x0e=*",
             ")",
             "\n\n`",
+            "-;;-=z",
         ] {
             let _ = ChangeLog::parse_relaxed(input);
+            let _ = ChangeLog::from_str(input);
         }
     }
 }
