@@ -1,0 +1,30 @@
+[package]
+name = "debian-changelog-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.debian-changelog]
+path = ".."
+
+[[bin]]
+name = "parse_changelog"
+path = "fuzz_targets/parse_changelog.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_relaxed_changelog"
+path = "fuzz_targets/parse_relaxed_changelog.rs"
+test = false
+doc = false
+bench = false
