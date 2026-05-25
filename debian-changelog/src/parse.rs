@@ -4817,13 +4817,7 @@ breezy (3.3.4-1) unstable; urgency=low
         // separate `tokens.len() - 2` underflow in `next()` when fewer
         // than two tokens remain. Both bugs hit `parse_relaxed` and the
         // strict `FromStr` path equally.
-        for input in [
-            "\x0e",
-            "\x0e=*",
-            ")",
-            "\n\n`",
-            "-;;-=z",
-        ] {
+        for input in ["\x0e", "\x0e=*", ")", "\n\n`", "-;;-=z"] {
             let _ = ChangeLog::parse_relaxed(input);
             let _ = ChangeLog::from_str(input);
         }
