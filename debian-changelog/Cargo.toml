@@ -2,7 +2,7 @@
 name = "debian-changelog"
 repository = "https://github.com/jelmer/debian-changelog-rs"
 description = "Parser for Debian changelog files"
-version = "0.2.22"
+version = "0.2.23"
 edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"
