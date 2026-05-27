@@ -37,6 +37,86 @@ use crate::lossless::relations::Relations;
 use deb822_lossless::{Deb822, Paragraph, TextRange};
 use rowan::ast::AstNode;
 
+/// A parsed `Name <email>` identity from a `Maintainer:` or `Uploaders:` field,
+/// with the byte range of the email address inside the source document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    /// The name part (may be empty for bare-email entries).
+    pub name: String,
+    /// The email address (with no surrounding angle brackets).
+    pub email: String,
+    /// The text range of the email inside the source document.
+    pub email_range: TextRange,
+}
+
+fn identities_in_field(paragraph: &Paragraph, field: &str) -> Vec<Identity> {
+    let Some(entry) = paragraph.get_entry(field) else {
+        return Vec::new();
+    };
+    // Collect each VALUE token alongside its absolute start offset. Joining the
+    // texts with `\n` between continuation lines yields a string whose byte
+    // layout maps back to absolute offsets via a per-segment lookup table.
+    use deb822_lossless::SyntaxKind;
+    use rowan::ast::AstNode;
+    let mut joined = String::new();
+    let mut segments: Vec<(usize, u32)> = Vec::new(); // (joined_offset, absolute_start)
+    for tok in entry
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|it| it.into_token())
+        .filter(|t| t.kind() == SyntaxKind::VALUE)
+    {
+        let absolute: u32 = tok.text_range().start().into();
+        if !joined.is_empty() {
+            joined.push('\n');
+        }
+        segments.push((joined.len(), absolute));
+        joined.push_str(tok.text());
+    }
+    if joined.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cursor: usize = 0;
+    for piece in joined.split(',') {
+        let piece_offset = cursor;
+        cursor += piece.len() + 1;
+        let Ok((name, email)) = crate::parse_identity(piece.trim()) else {
+            continue;
+        };
+        if email.is_empty() {
+            continue;
+        }
+        let Some(rel) = piece.find(email) else {
+            continue;
+        };
+        let email_joined_start = piece_offset + rel;
+        let Some(absolute_start) = joined_offset_to_absolute(&segments, email_joined_start) else {
+            continue;
+        };
+        out.push(Identity {
+            name: name.to_string(),
+            email: email.to_string(),
+            email_range: TextRange::new(
+                absolute_start.into(),
+                (absolute_start + email.len() as u32).into(),
+            ),
+        });
+    }
+    out
+}
+
+fn joined_offset_to_absolute(segments: &[(usize, u32)], joined_offset: usize) -> Option<u32> {
+    let mut last = segments.first()?;
+    for seg in segments {
+        if seg.0 > joined_offset {
+            break;
+        }
+        last = seg;
+    }
+    Some(last.1 + (joined_offset - last.0) as u32)
+}
+
 /// Parsing mode for Relations fields
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseMode {
@@ -935,6 +1015,23 @@ impl Source {
         );
     }
 
+    /// Iterate over the `Name <email>` identities in the `Maintainer:` field.
+    ///
+    /// Each yielded [`Identity`] carries the name, the email, and the
+    /// [`TextRange`] of the email inside the source document (excluding the
+    /// surrounding angle brackets). Entries that lack a valid email are
+    /// skipped.
+    pub fn maintainer_identities(&self) -> Vec<Identity> {
+        identities_in_field(&self.paragraph, "Maintainer")
+    }
+
+    /// Iterate over the comma-separated identities in the `Uploaders:` field.
+    ///
+    /// See [`Self::maintainer_identities`] for the yielded shape.
+    pub fn uploaders_identities(&self) -> Vec<Identity> {
+        identities_in_field(&self.paragraph, "Uploaders")
+    }
+
     /// Return the architecture field
     pub fn architecture(&self) -> Option<String> {
         self.paragraph.get("Architecture")
@@ -1518,6 +1615,32 @@ impl Binary {
 mod tests {
     use super::*;
     use crate::relations::VersionConstraint;
+
+    #[test]
+    fn maintainer_and_uploaders_identities_have_email_ranges() {
+        let text = "\
+Source: hello
+Maintainer: Alice <alice@example.org>
+Uploaders: Bob <bob@example.org>,
+ Carol <carol@example.org>
+";
+        let control = Control::parse(text).to_result().unwrap();
+        let source = control.source().unwrap();
+
+        let m = source.maintainer_identities();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].name, "Alice");
+        assert_eq!(m[0].email, "alice@example.org");
+        let r = m[0].email_range;
+        assert_eq!(&text[r], "alice@example.org");
+
+        let u = source.uploaders_identities();
+        assert_eq!(u.len(), 2);
+        assert_eq!(u[0].email, "bob@example.org");
+        assert_eq!(u[1].email, "carol@example.org");
+        assert_eq!(&text[u[0].email_range], "bob@example.org");
+        assert_eq!(&text[u[1].email_range], "carol@example.org");
+    }
 
     #[test]
     fn test_source_set_field_ordering() {

@@ -165,6 +165,23 @@ impl PatchHeader {
         })
     }
 
+    /// Iterate over Debian BTS bug numbers parsed from `Bug-Debian:` (and a
+    /// bare `Bug:` field when no vendor is specified).
+    ///
+    /// Accepts three value forms: a bare decimal number (`123456`), a
+    /// `#`-prefixed number, or a `https://bugs.debian.org/NNNNNN` URL. Values
+    /// that don't match are silently skipped.
+    pub fn debian_bug_ids(&self) -> impl Iterator<Item = u32> + '_ {
+        self.bugs().filter_map(|(vendor, value)| {
+            if let Some(v) = vendor {
+                if !v.eq_ignore_ascii_case("debian") {
+                    return None;
+                }
+            }
+            crate::fields::parse_debian_bug_id(&value)
+        })
+    }
+
     /// Set the upstream bug associated with the patch.
     pub fn set_upstream_bug(&mut self, bug: &str) {
         self.0.insert("Bug", bug);
@@ -591,6 +608,61 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
         assert_eq!(
             header.long_description(),
             Some("old long description".to_string())
+        );
+    }
+
+    #[test]
+    fn test_debian_bug_ids_from_url() {
+        let text = "Bug-Debian: https://bugs.debian.org/510219\n";
+        let header = PatchHeader::from_str(text).unwrap();
+        assert_eq!(header.debian_bug_ids().collect::<Vec<_>>(), vec![510219]);
+    }
+
+    #[test]
+    fn test_debian_bug_ids_bare_bug_field_included() {
+        // A bare `Bug:` field with no vendor counts as Debian per the doc.
+        let text = "Bug: 12345\n";
+        let header = PatchHeader::from_str(text).unwrap();
+        assert_eq!(header.debian_bug_ids().collect::<Vec<_>>(), vec![12345]);
+    }
+
+    #[test]
+    fn test_debian_bug_ids_vendor_case_insensitive() {
+        // Bug-DEBIAN should match too.
+        let text = "Bug-DEBIAN: #42\n";
+        let header = PatchHeader::from_str(text).unwrap();
+        assert_eq!(header.debian_bug_ids().collect::<Vec<_>>(), vec![42]);
+    }
+
+    #[test]
+    fn test_debian_bug_ids_skips_other_vendors() {
+        // Non-Debian vendor bugs (and unparseable Debian values) are skipped.
+        let text = "Bug: http://sourceware.org/bugzilla/show_bug.cgi?id=9697\n\
+                    Bug-Debian: https://bugs.debian.org/510219\n\
+                    Bug-Ubuntu: https://bugs.launchpad.net/bugs/12345\n";
+        let header = PatchHeader::from_str(text).unwrap();
+        assert_eq!(header.debian_bug_ids().collect::<Vec<_>>(), vec![510219]);
+    }
+
+    #[test]
+    fn test_debian_bug_ids_multiple_entries() {
+        let text = "Bug-Debian: https://bugs.debian.org/100\n\
+                    Bug-Debian: #200\n\
+                    Bug-Debian: 300\n";
+        let header = PatchHeader::from_str(text).unwrap();
+        assert_eq!(
+            header.debian_bug_ids().collect::<Vec<_>>(),
+            vec![100, 200, 300]
+        );
+    }
+
+    #[test]
+    fn test_debian_bug_ids_empty_when_no_bug_fields() {
+        let text = "Description: nothing to see here\n";
+        let header = PatchHeader::from_str(text).unwrap();
+        assert_eq!(
+            header.debian_bug_ids().collect::<Vec<_>>(),
+            Vec::<u32>::new()
         );
     }
 }

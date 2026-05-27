@@ -678,6 +678,35 @@ impl std::fmt::Display for DgitInfo {
     }
 }
 
+/// Source-stanza fields whose value is a list of package relations.
+///
+/// In declaration order as defined by Debian Policy 7. Listed here so that
+/// tools (linters, indexers, syntax highlighters) can enumerate them without
+/// duplicating the list.
+pub const SOURCE_RELATION_FIELDS: &[&str] = &[
+    "Build-Depends",
+    "Build-Depends-Indep",
+    "Build-Depends-Arch",
+    "Build-Conflicts",
+    "Build-Conflicts-Indep",
+    "Build-Conflicts-Arch",
+];
+
+/// Binary-stanza fields whose value is a list of package relations.
+///
+/// In declaration order as defined by Debian Policy 7.
+pub const BINARY_RELATION_FIELDS: &[&str] = &[
+    "Depends",
+    "Pre-Depends",
+    "Recommends",
+    "Suggests",
+    "Enhances",
+    "Breaks",
+    "Conflicts",
+    "Replaces",
+    "Provides",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
