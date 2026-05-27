@@ -164,6 +164,19 @@ pub(crate) fn format_origin(category: &Option<OriginCategory>, origin: &Origin) 
     )
 }
 
+/// Parse a Debian BTS bug-id value into a number, accepting:
+/// - a bare decimal number (`123456`)
+/// - a `#`-prefixed number
+/// - a `https://bugs.debian.org/NNNNNN` URL
+pub fn parse_debian_bug_id(value: &str) -> Option<u32> {
+    let trimmed = value.trim();
+    let candidate = trimmed
+        .trim_start_matches("https://bugs.debian.org/")
+        .trim_start_matches("http://bugs.debian.org/")
+        .trim_start_matches('#');
+    candidate.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +195,51 @@ mod tests {
 
         let other = AppliedUpstream::Other(Cow::Borrowed("merged"));
         assert_eq!(other.to_string(), "merged");
+    }
+
+    #[test]
+    fn test_parse_debian_bug_id_bare_number() {
+        assert_eq!(parse_debian_bug_id("123456"), Some(123456));
+    }
+
+    #[test]
+    fn test_parse_debian_bug_id_hash_prefix() {
+        assert_eq!(parse_debian_bug_id("#123456"), Some(123456));
+    }
+
+    #[test]
+    fn test_parse_debian_bug_id_https_url() {
+        assert_eq!(
+            parse_debian_bug_id("https://bugs.debian.org/510219"),
+            Some(510219)
+        );
+    }
+
+    #[test]
+    fn test_parse_debian_bug_id_http_url() {
+        assert_eq!(
+            parse_debian_bug_id("http://bugs.debian.org/510219"),
+            Some(510219)
+        );
+    }
+
+    #[test]
+    fn test_parse_debian_bug_id_trims_whitespace() {
+        assert_eq!(parse_debian_bug_id("  42  "), Some(42));
+        assert_eq!(parse_debian_bug_id("\t#42\n"), Some(42));
+    }
+
+    #[test]
+    fn test_parse_debian_bug_id_rejects_garbage() {
+        assert_eq!(parse_debian_bug_id(""), None);
+        assert_eq!(parse_debian_bug_id("abc"), None);
+        assert_eq!(parse_debian_bug_id("12abc"), None);
+        // Non-Debian BTS URL is not stripped, so the parse fails.
+        assert_eq!(
+            parse_debian_bug_id("https://bugzilla.example.com/9697"),
+            None
+        );
+        // A negative number is not a valid u32.
+        assert_eq!(parse_debian_bug_id("-1"), None);
     }
 }
