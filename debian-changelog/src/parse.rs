@@ -1633,6 +1633,30 @@ impl EntryHeader {
         self.try_version().and_then(|r| r.ok())
     }
 
+    /// Returns the text range of the version string inside the entry header,
+    /// excluding the surrounding parentheses.
+    ///
+    /// Returns `None` if the entry has no version token (malformed input).
+    pub fn version_range(&self) -> Option<rowan::TextRange> {
+        self.0.children_with_tokens().find_map(|it| {
+            let token = it.as_token()?;
+            if token.kind() != VERSION {
+                return None;
+            }
+            let r = token.text_range();
+            let s: u32 = r.start().into();
+            let e: u32 = r.end().into();
+            // The VERSION token text is `(<version>)`; strip the parens.
+            if e <= s + 2 {
+                return None;
+            }
+            Some(rowan::TextRange::new(
+                rowan::TextSize::from(s + 1),
+                rowan::TextSize::from(e - 1),
+            ))
+        })
+    }
+
     /// Returns the package name of the entry.
     pub fn package(&self) -> Option<String> {
         self.0.children_with_tokens().find_map(|it| {
@@ -1901,6 +1925,28 @@ impl EntryFooter {
                 }
             }
             None
+        })
+    }
+
+    /// Returns the text range of the email address, excluding the surrounding
+    /// angle brackets.
+    pub fn email_range(&self) -> Option<rowan::TextRange> {
+        self.0.children_with_tokens().find_map(|it| {
+            let token = it.as_token()?;
+            if token.kind() != EMAIL {
+                return None;
+            }
+            let r = token.text_range();
+            let s: u32 = r.start().into();
+            let e: u32 = r.end().into();
+            // EMAIL token text is `<address>`; strip the angle brackets.
+            if e <= s + 2 {
+                return None;
+            }
+            Some(rowan::TextRange::new(
+                rowan::TextSize::from(s + 1),
+                rowan::TextSize::from(e - 1),
+            ))
         })
     }
 
@@ -2181,6 +2227,12 @@ impl Entry {
         self.try_version().and_then(|r| r.ok())
     }
 
+    /// Returns the text range of the version string inside the entry header,
+    /// excluding the surrounding parentheses.
+    pub fn version_range(&self) -> Option<rowan::TextRange> {
+        self.header().and_then(|h| h.version_range())
+    }
+
     /// Set the version of the entry.
     pub fn set_version(&mut self, version: &Version) {
         if let Some(mut header) = self.header() {
@@ -2213,6 +2265,12 @@ impl Entry {
     /// Returns the email address of the maintainer.
     pub fn email(&self) -> Option<String> {
         self.footer().and_then(|f| f.email())
+    }
+
+    /// Returns the text range of the email address in the footer, excluding
+    /// the surrounding angle brackets.
+    pub fn email_range(&self) -> Option<rowan::TextRange> {
+        self.footer().and_then(|f| f.email_range())
     }
 
     /// Returns the maintainer AST node.
@@ -4821,5 +4879,99 @@ breezy (3.3.4-1) unstable; urgency=low
             let _ = ChangeLog::parse_relaxed(input);
             let _ = ChangeLog::from_str(input);
         }
+    }
+
+    #[test]
+    fn test_version_range_excludes_parens() {
+        let text = "foo (1.2-3) unstable; urgency=low\n\n  * Change.\n\n -- A B <a@b.example>  Mon, 01 Jan 2024 00:00:00 +0000\n";
+        let cl: ChangeLog = text.parse().unwrap();
+        let entry = cl.iter().next().unwrap();
+
+        let range = entry.version_range().expect("version range present");
+        let s: u32 = range.start().into();
+        let e: u32 = range.end().into();
+        assert_eq!(&text[s as usize..e as usize], "1.2-3");
+
+        // The full VERSION token still includes the parens.
+        let header = entry.header().unwrap();
+        let token_range = header
+            .0
+            .children_with_tokens()
+            .find_map(|it| {
+                let t = it.as_token()?;
+                (t.kind() == VERSION).then(|| t.text_range())
+            })
+            .unwrap();
+        let ts: u32 = token_range.start().into();
+        let te: u32 = token_range.end().into();
+        assert_eq!(&text[ts as usize..te as usize], "(1.2-3)");
+
+        // Entry-level helper agrees with the header-level one.
+        assert_eq!(
+            entry.header().unwrap().version_range(),
+            entry.version_range()
+        );
+    }
+
+    #[test]
+    fn test_email_range_excludes_angle_brackets() {
+        let text = "foo (1.2-3) unstable; urgency=low\n\n  * Change.\n\n -- A B <a@b.example>  Mon, 01 Jan 2024 00:00:00 +0000\n";
+        let cl: ChangeLog = text.parse().unwrap();
+        let entry = cl.iter().next().unwrap();
+
+        let range = entry.email_range().expect("email range present");
+        let s: u32 = range.start().into();
+        let e: u32 = range.end().into();
+        assert_eq!(&text[s as usize..e as usize], "a@b.example");
+
+        // The full EMAIL token still includes the angle brackets.
+        let footer = entry.footer().unwrap();
+        let token_range = footer
+            .0
+            .children_with_tokens()
+            .find_map(|it| {
+                let t = it.as_token()?;
+                (t.kind() == EMAIL).then(|| t.text_range())
+            })
+            .unwrap();
+        let ts: u32 = token_range.start().into();
+        let te: u32 = token_range.end().into();
+        assert_eq!(&text[ts as usize..te as usize], "<a@b.example>");
+
+        assert_eq!(entry.footer().unwrap().email_range(), entry.email_range());
+    }
+
+    #[test]
+    fn test_version_range_second_entry_offsets_from_start() {
+        let text = "foo (1.0-1) unstable; urgency=low\n\n  * First.\n\n -- A B <a@b.example>  Mon, 01 Jan 2024 00:00:00 +0000\n\nfoo (2.0-1) unstable; urgency=low\n\n  * Second.\n\n -- A B <a@b.example>  Tue, 02 Jan 2024 00:00:00 +0000\n";
+        let cl: ChangeLog = text.parse().unwrap();
+        let entries: Vec<_> = cl.iter().collect();
+        assert_eq!(entries.len(), 2);
+
+        let r = entries[1].version_range().unwrap();
+        let s: u32 = r.start().into();
+        let e: u32 = r.end().into();
+        assert_eq!(&text[s as usize..e as usize], "2.0-1");
+    }
+
+    #[test]
+    fn test_version_range_none_for_malformed_header() {
+        // An old-style trailing entry has no VERSION token in its header.
+        let text =
+            "foo unstable; urgency=low\n\n  * Initial release. Closes: #12345\n\n -- John Doe <jd@example.com>  Mon, 01 Jan 2024 00:00:00 +0000\n";
+        let cl = ChangeLog::parse_relaxed(text);
+        let first = cl.iter().next();
+        if let Some(entry) = first {
+            assert_eq!(entry.version_range(), None);
+        }
+    }
+
+    #[test]
+    fn test_email_range_none_when_footer_has_no_email() {
+        // No footer at all — email_range should be None.
+        let text = "foo (1.0-1) unstable; urgency=low\n\n  * Change.\n";
+        let cl = ChangeLog::parse_relaxed(text);
+        let entry = cl.iter().next().unwrap();
+        assert_eq!(entry.email_range(), None);
     }
 }
