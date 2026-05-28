@@ -3930,7 +3930,11 @@ Description: A simple test package
     #[test]
     fn test_value_token_range_multiword() {
         let input = "License: GPL-2+ with the autoconf exception\n";
-        let para = Deb822::from_str(input).unwrap().paragraphs().next().unwrap();
+        let para = Deb822::from_str(input)
+            .unwrap()
+            .paragraphs()
+            .next()
+            .unwrap();
         let entry = para.entries().next().unwrap();
         let token_range = entry.value_token_range().unwrap();
         // Only the first whitespace-delimited token (the short-name).
@@ -3943,7 +3947,11 @@ Description: A simple test package
     #[test]
     fn test_value_token_range_empty() {
         let input = "Description:\n";
-        let para = Deb822::from_str(input).unwrap().paragraphs().next().unwrap();
+        let para = Deb822::from_str(input)
+            .unwrap()
+            .paragraphs()
+            .next()
+            .unwrap();
         let entry = para.entries().next().unwrap();
         assert_eq!(entry.value_token_range(), None);
     }
