@@ -2518,6 +2518,38 @@ impl Entry {
             .collect()
     }
 
+    /// Returns the text range of the first whitespace-delimited token of the
+    /// value.
+    ///
+    /// For single-word values (e.g. `Source: hello`) this is the whole value.
+    /// For multi-word values it covers just the first word, which is useful for
+    /// fields whose first token is an identifier — for example the license
+    /// short-name in a DEP-5 `License:` field (`GPL-2+ with exceptions`).
+    /// Returns `None` if the value is empty.
+    pub fn value_token_range(&self) -> Option<rowan::TextRange> {
+        let value_range = self.value_range()?;
+        let first = self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == VALUE)?;
+        let text = first.text();
+        let leading_ws = text.len() - text.trim_start().len();
+        let token_len = text[leading_ws..]
+            .find(char::is_whitespace)
+            .unwrap_or(text.len() - leading_ws);
+        if token_len == 0 {
+            return None;
+        }
+        let start = first.text_range().start() + rowan::TextSize::from(leading_ws as u32);
+        let end = start + rowan::TextSize::from(token_len as u32);
+        // Defensively clamp to the value range.
+        if start < value_range.start() || end > value_range.end() {
+            return None;
+        }
+        Some(rowan::TextRange::new(start, end))
+    }
+
     /// Create a new entry with the given key and value.
     pub fn new(key: &str, value: &str) -> Entry {
         Self::with_indentation(key, value, " ")
@@ -3886,6 +3918,42 @@ Description: A simple test package
             &input[value_lines[0].start().into()..value_lines[0].end().into()],
             "test-package"
         );
+
+        // Test value_token_range: single-word value covers the whole value.
+        let token_range = package_entry.value_token_range().unwrap();
+        assert_eq!(
+            &input[token_range.start().into()..token_range.end().into()],
+            "test-package"
+        );
+    }
+
+    #[test]
+    fn test_value_token_range_multiword() {
+        let input = "License: GPL-2+ with the autoconf exception\n";
+        let para = Deb822::from_str(input)
+            .unwrap()
+            .paragraphs()
+            .next()
+            .unwrap();
+        let entry = para.entries().next().unwrap();
+        let token_range = entry.value_token_range().unwrap();
+        // Only the first whitespace-delimited token (the short-name).
+        assert_eq!(
+            &input[token_range.start().into()..token_range.end().into()],
+            "GPL-2+"
+        );
+    }
+
+    #[test]
+    fn test_value_token_range_empty() {
+        let input = "Description:\n";
+        let para = Deb822::from_str(input)
+            .unwrap()
+            .paragraphs()
+            .next()
+            .unwrap();
+        let entry = para.entries().next().unwrap();
+        assert_eq!(entry.value_token_range(), None);
     }
 
     #[test]

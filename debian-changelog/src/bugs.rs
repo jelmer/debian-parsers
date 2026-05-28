@@ -17,7 +17,7 @@ pub enum BugTracker {
 }
 
 /// A resolved bug reference (tracker + number).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bug {
     /// Debian BTS bug (`Closes: #NNN`)
     Debian(u32),
@@ -279,6 +279,72 @@ pub fn bug_ref_spans(detail_text: &str, continues_from_prev: bool) -> Vec<BugRef
     spans
 }
 
+/// A single bug reference resolved within a detail line: the bug and the byte
+/// range of its number (excluding the leading `#`) relative to the detail text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BugRef {
+    /// The resolved bug.
+    pub bug: Bug,
+    /// Byte offset of the first digit within the detail text.
+    pub start: usize,
+    /// Byte offset past the last digit within the detail text.
+    pub end: usize,
+}
+
+/// Iterate every individual bug reference in a detail line.
+///
+/// Each `Closes:`/`LP:` marker is followed by a comma-separated list of
+/// `#NNN` numbers; this yields one [`BugRef`] per number, classified to the
+/// nearest preceding marker, with the byte range covering just the digits.
+///
+/// # Example
+///
+/// ```
+/// use debian_changelog::bugs::{iter_bug_refs, Bug};
+///
+/// let line = "* Fix. (Closes: #111, #222)";
+/// let refs = iter_bug_refs(line);
+/// assert_eq!(refs.len(), 2);
+/// assert_eq!(refs[0].bug, Bug::Debian(111));
+/// assert_eq!(&line[refs[0].start..refs[0].end], "111");
+/// assert_eq!(refs[1].bug, Bug::Debian(222));
+/// ```
+pub fn iter_bug_refs(detail_text: &str) -> Vec<BugRef> {
+    let mut out = Vec::new();
+    for (tracker, marker_idx, marker_len) in find_markers(detail_text) {
+        let after = &detail_text[marker_idx + marker_len..];
+        let mut pos = marker_idx + marker_len;
+        for fragment in after.split(',') {
+            let frag_start = pos;
+            pos = frag_start + fragment.len() + 1; // +1 for the comma
+            let trimmed_start = frag_start + (fragment.len() - fragment.trim_start().len());
+            let trimmed = fragment.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // Skip an optional leading '#'.
+            let (digit_start, digits) = match trimmed.strip_prefix('#') {
+                Some(rest) => (trimmed_start + 1, rest),
+                None => (trimmed_start, trimmed),
+            };
+            let digit_len = digits.chars().take_while(|c| c.is_ascii_digit()).count();
+            if digit_len == 0 {
+                // A non-numeric fragment ends this marker's list.
+                break;
+            }
+            if let Ok(id) = digits[..digit_len].parse::<u32>() {
+                out.push(BugRef {
+                    bug: make_bug(tracker, id),
+                    start: digit_start,
+                    end: digit_start + digit_len,
+                });
+            }
+        }
+    }
+    out.sort_by_key(|r| r.start);
+    out
+}
+
 /// Extract a continuation span from the start of a detail line (leading
 /// `#NNN, #NNN` following a marker on the previous line).
 fn continuation_span(detail_text: &str) -> Option<BugRefSpan> {
@@ -313,6 +379,36 @@ mod tests {
     fn test_closes_single() {
         let line = "* Fix bug. (Closes: #123456)";
         assert_eq!(bug_at_offset(line, 0, 21), Some(Bug::Debian(123456)));
+    }
+
+    #[test]
+    fn test_iter_bug_refs_debian_and_launchpad() {
+        let line = "* Fix. (Closes: #111, #222) (LP: #333)";
+        let refs = iter_bug_refs(line);
+        let bugs: Vec<_> = refs.iter().map(|r| r.bug).collect();
+        assert_eq!(
+            bugs,
+            vec![Bug::Debian(111), Bug::Debian(222), Bug::Launchpad(333)]
+        );
+        // Ranges cover just the digits.
+        for r in &refs {
+            assert_eq!(line[r.start..r.end].parse::<u32>().unwrap(), r.bug.id());
+        }
+    }
+
+    #[test]
+    fn test_iter_bug_refs_none() {
+        assert!(iter_bug_refs("* Just a normal change.").is_empty());
+    }
+
+    #[test]
+    fn test_iter_bug_refs_without_hash() {
+        // Some changelogs omit the '#'.
+        let line = "Closes: 555";
+        let refs = iter_bug_refs(line);
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].bug, Bug::Debian(555));
+        assert_eq!(&line[refs[0].start..refs[0].end], "555");
     }
 
     #[test]
