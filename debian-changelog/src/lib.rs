@@ -28,6 +28,8 @@ mod parse;
 use lazy_regex::regex_captures;
 pub mod bugs;
 pub mod changes;
+#[cfg(feature = "merge")]
+pub mod merge;
 pub mod textwrap;
 use crate::parse::{SyntaxNode, SyntaxToken};
 use debversion::Version;
