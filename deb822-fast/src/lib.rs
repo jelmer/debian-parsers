@@ -444,6 +444,17 @@ impl Deb822 {
         buf.parse()
     }
 
+    /// Read from an async reader.
+    #[cfg(feature = "stream")]
+    pub async fn from_async_reader<R: futures::io::AsyncRead + Unpin>(
+        mut r: R,
+    ) -> Result<Self, Error> {
+        use futures::AsyncReadExt;
+        let mut buf = String::new();
+        r.read_to_string(&mut buf).await?;
+        buf.parse()
+    }
+
     /// Stream paragraphs from a reader.
     ///
     /// This returns an iterator that reads and parses paragraphs one at a time,
@@ -943,6 +954,17 @@ Version: 2.10
 
         let result = Deb822::from_reader(FailingReader);
         assert!(matches!(result, Err(Error::Io(_))));
+    }
+
+    #[cfg(feature = "stream")]
+    #[test]
+    fn test_from_async_reader() {
+        let input = "Package: hello\nVersion: 1.0\n";
+        let result =
+            futures::executor::block_on(Deb822::from_async_reader(input.as_bytes())).unwrap();
+        assert_eq!(result.len(), 1);
+        let para = result.iter().next().unwrap();
+        assert_eq!(para.get("Package"), Some("hello"));
     }
 
     #[test]
