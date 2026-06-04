@@ -11,4 +11,4 @@ This parser is optimized for speed and memory usage. It provides two APIs:
   and fields). Requires lifetime management.
 
 For editing purposes where you need to preserve formatting, whitespace and comments,
-you may want to use a more feature-complete parser like ``deb822-lossless``.
+you may want to use a more feature-complete parser like ``deb822-edit``.

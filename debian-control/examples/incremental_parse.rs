@@ -1,4 +1,4 @@
-use deb822_lossless::TextRange;
+use deb822_edit::TextRange;
 use debian_control::lossless::Control;
 
 fn main() {

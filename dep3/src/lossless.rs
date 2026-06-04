@@ -17,7 +17,7 @@
 //! assert_eq!(patch_header.description(), Some("[PATCH] fix a bug".to_string()));
 //! assert_eq!(patch_header.vendor_bugs("Debian").collect::<Vec<_>>(), vec!["https://bugs.debian.org/123456".to_string()]);
 //! ```
-use deb822_lossless::Paragraph;
+use deb822_edit::Paragraph;
 
 use crate::fields::*;
 
@@ -278,7 +278,7 @@ impl Default for PatchHeader {
 }
 
 impl std::str::FromStr for PatchHeader {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(PatchHeader(Paragraph::from_str(s)?))
@@ -324,7 +324,7 @@ impl PatchHeader {
     /// fail (or, with malformed continuations, misparse) when handed a
     /// patch with diff content; `parse_relaxed` is the appropriate
     /// entry point for that case.
-    pub fn parse_relaxed(content: &str) -> Result<(Self, usize), deb822_lossless::ParseError> {
+    pub fn parse_relaxed(content: &str) -> Result<(Self, usize), deb822_edit::ParseError> {
         use std::str::FromStr;
         let end = header_end(content);
         let header = PatchHeader::from_str(&content[..end])?;
@@ -582,7 +582,7 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
     #[test]
     fn test_set_description_with_blank_lines() {
         // Descriptions containing blank lines (e.g. from fixer result messages)
-        // must be encoded as " ." continuation lines so that deb822-lossless
+        // must be encoded as " ." continuation lines so that deb822-edit
         // does not reject them as empty continuation lines.
         let mut header = PatchHeader::new();
         header.set_description("Fix frobnication\n\nDetails follow.");

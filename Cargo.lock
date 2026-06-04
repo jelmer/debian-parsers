@@ -644,14 +644,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "deb822-fast"
-version = "0.2.3"
-dependencies = [
- "deb822-derive",
-]
-
-[[package]]
-name = "deb822-lossless"
+name = "deb822-edit"
 version = "0.5.17"
 dependencies = [
  "criterion",
@@ -660,6 +653,13 @@ dependencies = [
  "regex",
  "rowan",
  "serde",
+]
+
+[[package]]
+name = "deb822-fast"
+version = "0.2.3"
+dependencies = [
+ "deb822-derive",
 ]
 
 [[package]]
@@ -684,8 +684,8 @@ name = "debian-control"
 version = "0.3.12"
 dependencies = [
  "chrono",
+ "deb822-edit",
  "deb822-fast",
- "deb822-lossless",
  "debversion",
  "pyo3",
  "regex",
@@ -699,8 +699,8 @@ dependencies = [
 name = "debian-copyright"
 version = "0.1.50"
 dependencies = [
+ "deb822-edit",
  "deb822-fast",
- "deb822-lossless",
  "debversion",
  "regex",
 ]
@@ -711,7 +711,7 @@ version = "0.4.12"
 dependencies = [
  "anyhow",
  "clap",
- "deb822-lossless",
+ "deb822-edit",
  "debversion",
  "m_lexer",
  "maplit",
@@ -742,8 +742,8 @@ name = "dep3"
 version = "0.2.3"
 dependencies = [
  "chrono",
+ "deb822-edit",
  "deb822-fast",
- "deb822-lossless",
  "url",
 ]
 

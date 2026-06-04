@@ -7,7 +7,7 @@ files, implement in Rust.
 
 The core two deb822 parsers are :
 
-* ``deb822-lossless``: parser that preserves formatting, whitespace and comments as well as allowing syntax errors.
+* ``deb822-edit``: parser that preserves formatting, whitespace and comments as well as allowing syntax errors.
 * ``deb822-fast``: a fast parser that does not preserve formatting, whitespace and comments.
 
 Several crates that build on these two crates are:

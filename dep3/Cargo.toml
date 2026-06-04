@@ -4,20 +4,20 @@ edition = "2021"
 license = "Apache-2.0"
 version = "0.2.3"
 description = "A library for parsing and generating DEP-3 headers."
-homepage = "https://github.com/jelmer/deb822-lossless"
-repository = "https://github.com/jelmer/deb822-lossless"
+homepage = "https://github.com/jelmer/deb822-edit"
+repository = "https://github.com/jelmer/deb822-edit"
 keywords = ["debian", "patch", "dep3", "lossless"]
 categories = ["parser-implementations"]
 
 [dependencies]
 chrono = ">=0.4, <0.5"
-deb822-lossless = { path = "../deb822-lossless", version = ">=0.2, <0.6", optional = true }
+deb822-edit = { path = "../deb822-edit", version = ">=0.2, <0.6", optional = true }
 deb822-fast = { path = "../deb822-fast", version = ">=0.1, <0.3", features = ["derive"] }
 url = ">=2, <3"
 
 [features]
 default = ["lossless"]
-lossless = ["dep:deb822-lossless"]
+lossless = ["dep:deb822-edit"]
 
 [badges]
 maintenance = { status = "actively-maintained" }
