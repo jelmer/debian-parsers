@@ -10,16 +10,16 @@
 //! # Example
 //!
 //! ```rust
-//! use deb822_lossless::Deb822;
+//! use deb822_edit::Deb822;
 //! use std::str::FromStr;
 //!
-//! let input = r###"Package: deb822-lossless
+//! let input = r###"Package: deb822-edit
 //! ## Comments are preserved
 //! Maintainer: Jelmer Vernooĳ <jelmer@debian.org>
-//! Homepage: https://github.com/jelmer/deb822-lossless
+//! Homepage: https://github.com/jelmer/deb822-edit
 //! Section: rust
 //!
-//! Package: deb822-lossless
+//! Package: deb822-edit
 //! Architecture: any
 //! Description: Lossless parser for deb822 style files.
 //!   This parser can be used to parse files in the deb822 format, while preserving
@@ -30,7 +30,7 @@
 //! let deb822 = Deb822::from_str(input).unwrap();
 //! assert_eq!(deb822.paragraphs().count(), 2);
 //! let homepage = deb822.paragraphs().nth(0).unwrap().get("Homepage");
-//! assert_eq!(homepage.as_deref(), Some("https://github.com/jelmer/deb822-lossless"));
+//! assert_eq!(homepage.as_deref(), Some("https://github.com/jelmer/deb822-edit"));
 //! ```
 
 use crate::{
@@ -721,7 +721,7 @@ impl Deb822 {
     ///
     /// # Example
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     ///
     /// let text = "Package: foo\n";
     /// let deb822: Deb822 = text.parse().unwrap();
@@ -855,7 +855,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// use std::str::FromStr;
     ///
     /// let input = "Field1:    value1\nField2:value2\n\nField3:  value3\n";
@@ -900,7 +900,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::{Deb822, TextRange};
+    /// use deb822_edit::{Deb822, TextRange};
     ///
     /// let input = "Package: foo\n\nPackage: bar\n\nPackage: baz\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -934,7 +934,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::{Deb822, TextSize};
+    /// use deb822_edit::{Deb822, TextSize};
     ///
     /// let input = "Package: foo\n\nPackage: bar\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -963,7 +963,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     ///
     /// let input = "Package: foo\nVersion: 1.0\n\nPackage: bar\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -997,7 +997,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     ///
     /// let input = "Package: foo\nVersion: 1.0\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -1088,7 +1088,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::{Deb822, Paragraph};
+    /// use deb822_edit::{Deb822, Paragraph};
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
     ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
@@ -1111,7 +1111,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
     ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
@@ -1138,7 +1138,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar"), ("Baz", "Qux")].into_iter().collect(),
     ///     vec![("A", "B"), ("C", "D")].into_iter().collect(),
@@ -1278,7 +1278,7 @@ impl Deb822 {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar")].into_iter().collect(),
     ///     vec![("A", "B")].into_iter().collect(),
@@ -1511,7 +1511,7 @@ impl Paragraph {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::{Deb822, TextRange};
+    /// use deb822_edit::{Deb822, TextRange};
     ///
     /// let input = "Package: foo\nVersion: 1.0\nArchitecture: amd64\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -1543,7 +1543,7 @@ impl Paragraph {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::{Deb822, TextSize};
+    /// use deb822_edit::{Deb822, TextSize};
     ///
     /// let input = "Package: foo\nVersion: 1.0\n";
     /// let deb822 = Deb822::parse(input).tree();
@@ -1642,7 +1642,7 @@ impl Paragraph {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// use std::str::FromStr;
     ///
     /// let input = "Field1:    value1\nField2:value2\n";
@@ -1724,7 +1724,7 @@ impl Paragraph {
     ///
     /// # Example
     /// ```
-    /// use deb822_lossless::{Deb822, IndentPattern};
+    /// use deb822_edit::{Deb822, IndentPattern};
     /// use std::str::FromStr;
     ///
     /// let input = "Field: First\n   Second\n   Third\n";
@@ -1798,7 +1798,7 @@ impl Paragraph {
     /// # Example
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     ///
     /// let text = "Description: Short description\n Additional line\n";
     /// let deb822 = Deb822::parse(text).tree();
@@ -1829,7 +1829,7 @@ impl Paragraph {
     /// # Example
     ///
     /// ```
-    /// use deb822_lossless::Paragraph;
+    /// use deb822_edit::Paragraph;
     ///
     /// let mut para = Paragraph::new();
     /// para.set_multiline("Description", "Short description\nAdditional line", None).unwrap();
@@ -1908,7 +1908,7 @@ impl Paragraph {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// let mut d: Deb822 = vec![
     ///     vec![("Foo", "Bar")].into_iter().collect(),
     /// ]
@@ -2854,7 +2854,7 @@ impl Entry {
     /// # Examples
     ///
     /// ```
-    /// use deb822_lossless::Deb822;
+    /// use deb822_edit::Deb822;
     /// use std::str::FromStr;
     ///
     /// // Parse an entry with extra spacing after the colon

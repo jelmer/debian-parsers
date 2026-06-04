@@ -34,7 +34,7 @@
 //! ```
 use crate::fields::{MultiArch, Priority};
 use crate::lossless::relations::Relations;
-use deb822_lossless::{Deb822, Paragraph, TextRange};
+use deb822_edit::{Deb822, Paragraph, TextRange};
 use rowan::ast::AstNode;
 
 /// A parsed `Name <email>` identity from a `Maintainer:` or `Uploaders:` field,
@@ -56,7 +56,7 @@ fn identities_in_field(paragraph: &Paragraph, field: &str) -> Vec<Identity> {
     // Collect each VALUE token alongside its absolute start offset. Joining the
     // texts with `\n` between continuation lines yields a string whose byte
     // layout maps back to absolute offsets via a per-segment lookup table.
-    use deb822_lossless::SyntaxKind;
+    use deb822_edit::SyntaxKind;
     use rowan::ast::AstNode;
     let mut joined = String::new();
     let mut segments: Vec<(usize, u32)> = Vec::new(); // (joined_offset, absolute_start)
@@ -286,13 +286,13 @@ impl Control {
     }
 
     /// Parse control file text, returning a Parse result
-    pub fn parse(text: &str) -> deb822_lossless::Parse<Control> {
+    pub fn parse(text: &str) -> deb822_edit::Parse<Control> {
         let deb822_parse = Deb822::parse(text);
         // Transform Parse<Deb822> to Parse<Control>
         let green = deb822_parse.green().clone();
         let errors = deb822_parse.errors().to_vec();
         let positioned_errors = deb822_parse.positioned_errors().to_vec();
-        deb822_lossless::Parse::new_with_positioned_errors(green, errors, positioned_errors)
+        deb822_edit::Parse::new_with_positioned_errors(green, errors, positioned_errors)
     }
 
     /// Return the source package
@@ -424,7 +424,7 @@ impl Control {
     }
 
     /// Read a control file from a file
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_lossless::Error> {
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, deb822_edit::Error> {
         Ok(Control {
             deb822: Deb822::from_file(path)?,
             parse_mode: ParseMode::Strict,
@@ -446,7 +446,7 @@ impl Control {
     }
 
     /// Read a control file from a reader
-    pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, deb822_lossless::Error> {
+    pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, deb822_edit::Error> {
         Ok(Control {
             deb822: Deb822::read(&mut r)?,
             parse_mode: ParseMode::Strict,
@@ -456,7 +456,7 @@ impl Control {
     /// Read a control file from a reader, allowing syntax errors
     pub fn read_relaxed<R: std::io::Read>(
         mut r: R,
-    ) -> Result<(Self, Vec<String>), deb822_lossless::Error> {
+    ) -> Result<(Self, Vec<String>), deb822_edit::Error> {
         let (deb822, errors) = Deb822::read_relaxed(&mut r)?;
         Ok((
             Control {
@@ -475,7 +475,7 @@ impl Control {
     /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
@@ -599,7 +599,7 @@ impl Control {
     /// # Example
     /// ```rust
     /// use debian_control::lossless::Control;
-    /// use deb822_lossless::TextRange;
+    /// use deb822_edit::TextRange;
     ///
     /// let control_text = "Source: foo\nMaintainer: test@example.com\n\nPackage: bar\nArchitecture: all\n";
     /// let control: Control = control_text.parse().unwrap();
@@ -615,7 +615,7 @@ impl Control {
     pub fn fields_in_range(
         &self,
         range: TextRange,
-    ) -> impl Iterator<Item = deb822_lossless::Entry> + '_ {
+    ) -> impl Iterator<Item = deb822_edit::Entry> + '_ {
         self.deb822
             .paragraphs()
             .flat_map(move |p| p.entries().collect::<Vec<_>>())
@@ -649,7 +649,7 @@ impl Default for Control {
 }
 
 impl std::str::FromStr for Control {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Control::parse(s).to_result()
@@ -702,7 +702,7 @@ impl Source {
     /// Wrap and sort the control file paragraph
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
@@ -1097,7 +1097,7 @@ impl Source {
     pub fn fields_in_range(
         &self,
         range: TextRange,
-    ) -> impl Iterator<Item = deb822_lossless::Entry> + '_ {
+    ) -> impl Iterator<Item = deb822_edit::Entry> + '_ {
         self.paragraph.entries().filter(move |entry| {
             let entry_range = entry.syntax().text_range();
             entry_range.start() < range.end() && range.start() < entry_range.end()
@@ -1146,7 +1146,7 @@ impl std::fmt::Display for Control {
 }
 
 impl AstNode for Control {
-    type Language = deb822_lossless::Lang;
+    type Language = deb822_edit::Lang;
 
     fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
         Deb822::can_cast(kind)
@@ -1263,7 +1263,7 @@ impl Binary {
     /// Wrap and sort the control file
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
@@ -1552,7 +1552,7 @@ impl Binary {
             self.paragraph.set_with_indent_pattern(
                 "Description",
                 description,
-                Some(&deb822_lossless::IndentPattern::Fixed(1)),
+                Some(&deb822_edit::IndentPattern::Fixed(1)),
                 Some(BINARY_FIELD_ORDER),
             );
         } else {
@@ -1603,7 +1603,7 @@ impl Binary {
     pub fn fields_in_range(
         &self,
         range: TextRange,
-    ) -> impl Iterator<Item = deb822_lossless::Entry> + '_ {
+    ) -> impl Iterator<Item = deb822_edit::Entry> + '_ {
         self.paragraph.entries().filter(move |entry| {
             let entry_range = entry.syntax().text_range();
             entry_range.start() < range.end() && range.start() < entry_range.end()
@@ -1951,7 +1951,7 @@ Description: this is a
 "#
         .parse()
         .unwrap();
-        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(2), false, None);
+        control.wrap_and_sort(deb822_edit::Indentation::Spaces(2), false, None);
         let expected = r#"Package: blah
 Section: libs
 
@@ -1972,7 +1972,7 @@ Depends: foo, bar   (<=  1.0.0)
 "#
         .parse()
         .unwrap();
-        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(2), true, None);
+        control.wrap_and_sort(deb822_edit::Indentation::Spaces(2), true, None);
         let expected = r#"Source: blah
 Depends: bar (<= 1.0.0), foo
 "#
@@ -1989,7 +1989,7 @@ Build-Depends: foo, bar (>= 1.0.0)
         .parse()
         .unwrap();
         let mut source = control.source().unwrap();
-        source.wrap_and_sort(deb822_lossless::Indentation::Spaces(2), true, None);
+        source.wrap_and_sort(deb822_edit::Indentation::Spaces(2), true, None);
         // The actual behavior - the method modifies the source in-place
         // but doesn't automatically affect the overall control structure
         // So we just test that the method executes without error
@@ -2957,7 +2957,7 @@ Build-Depends: debhelper-compat (= 13), aaaa, bbbb, cccc, dddd, eeee, ffff, gggg
 
 "#;
         let mut control: Control = input.parse().unwrap();
-        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+        control.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, Some(79));
 
         let expected = r#"Source: test-package
 Maintainer: Test <test@example.com>
@@ -2986,7 +2986,7 @@ Build-Depends: debhelper-compat (= 13), foo, bar
 
 "#;
         let mut control: Control = input.parse().unwrap();
-        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+        control.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, Some(79));
 
         // Note: existing behaviour drops the space after the colon for the
         // one-liner branch in rebuild_value; that is unrelated to this fix.
@@ -3007,7 +3007,7 @@ Build-Depends: debhelper-compat (= 13), foo, bar
             value
         );
         let mut control: Control = input.parse().unwrap();
-        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+        control.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, Some(79));
         let out = control.to_string();
         assert!(out.contains("bar [amd64 arm64],\n"), "out was: {}", out);
         assert!(
@@ -3032,7 +3032,7 @@ Architecture: any
         let mut control: Control = input.parse().unwrap();
 
         // This should not panic, even with malformed relations
-        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(2), false, None);
+        control.wrap_and_sort(deb822_edit::Indentation::Spaces(2), false, None);
 
         // The malformed field should be preserved as-is (lossless behavior)
         let output = control.to_string();

@@ -1,5 +1,5 @@
 [package]
-name = "deb822-lossless"
+name = "deb822-edit"
 authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
 edition = "2021"
 license = "Apache-2.0"

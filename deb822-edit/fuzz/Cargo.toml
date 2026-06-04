@@ -1,5 +1,5 @@
 [package]
-name = "deb822-lossless-fuzz"
+name = "deb822-edit-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -12,7 +12,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.deb822-lossless]
+[dependencies.deb822-edit]
 path = ".."
 
 [[bin]]
