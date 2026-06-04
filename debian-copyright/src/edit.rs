@@ -7,7 +7,7 @@
 //!
 //! ```rust
 //!
-//! use debian_copyright::lossless::Copyright;
+//! use debian_copyright::edit::Copyright;
 //! use std::path::Path;
 //!
 //! let text = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
@@ -36,20 +36,20 @@
 //! ```
 
 use crate::{License, CURRENT_FORMAT, KNOWN_FORMATS};
-use deb822_lossless::IndentPattern;
-use deb822_lossless::{Deb822, Paragraph, TextRange};
+use deb822_edit::IndentPattern;
+use deb822_edit::{Deb822, Paragraph, TextRange};
 use std::path::Path;
 
 /// Decode deb822 paragraph markers in a multi-line field value.
 ///
 /// According to Debian policy, blank lines in multi-line field values are
-/// represented as lines containing only "." (a single period). The deb822-lossless
+/// represented as lines containing only "." (a single period). The deb822-edit
 /// parser already strips the leading indentation whitespace from continuation lines,
 /// so we only need to decode the period markers back to blank lines.
 ///
 /// # Arguments
 ///
-/// * `text` - The raw field value text from deb822-lossless with indentation already stripped
+/// * `text` - The raw field value text from deb822-edit with indentation already stripped
 ///
 /// # Returns
 ///
@@ -71,7 +71,7 @@ fn decode_field_text(text: &str) -> String {
 /// Encode blank lines in a field value to deb822 paragraph markers.
 ///
 /// According to Debian policy, blank lines in multi-line field values must be
-/// represented as lines containing only "." (a single period). The deb822-lossless
+/// represented as lines containing only "." (a single period). The deb822-edit
 /// library will reject values with actual blank lines, so we must encode them first.
 ///
 /// # Arguments
@@ -394,7 +394,7 @@ impl Copyright {
     /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
@@ -471,7 +471,7 @@ impl Copyright {
 #[derive(Debug)]
 pub enum Error {
     /// Parse error
-    ParseError(deb822_lossless::ParseError),
+    ParseError(deb822_edit::ParseError),
 
     /// IO error
     IoError(std::io::Error),
@@ -483,12 +483,12 @@ pub enum Error {
     NotMachineReadable,
 }
 
-impl From<deb822_lossless::Error> for Error {
-    fn from(e: deb822_lossless::Error) -> Self {
+impl From<deb822_edit::Error> for Error {
+    fn from(e: deb822_edit::Error) -> Self {
         match e {
-            deb822_lossless::Error::ParseError(e) => Error::ParseError(e),
-            deb822_lossless::Error::IoError(e) => Error::IoError(e),
-            deb822_lossless::Error::InvalidValue(msg) => Error::InvalidValue(msg),
+            deb822_edit::Error::ParseError(e) => Error::ParseError(e),
+            deb822_edit::Error::IoError(e) => Error::IoError(e),
+            deb822_edit::Error::InvalidValue(msg) => Error::InvalidValue(msg),
         }
     }
 }
@@ -499,8 +499,8 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<deb822_lossless::ParseError> for Error {
-    fn from(e: deb822_lossless::ParseError) -> Self {
+impl From<deb822_edit::ParseError> for Error {
+    fn from(e: deb822_edit::ParseError) -> Self {
         Error::ParseError(e)
     }
 }
@@ -690,12 +690,12 @@ impl Header {
     /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
         let sort_entries =
-            |a: &deb822_lossless::Entry, b: &deb822_lossless::Entry| -> std::cmp::Ordering {
+            |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
                 let a_key = a.key().unwrap_or_default();
                 let b_key = b.key().unwrap_or_default();
                 let a_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == a_key);
@@ -732,7 +732,7 @@ impl FilesParagraph {
     /// or auto-detected indentation.
     pub fn set_field(&mut self, name: &str, value: &str) {
         if name.eq_ignore_ascii_case("License") {
-            let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+            let indent_pattern = deb822_edit::IndentPattern::Fixed(1);
             self.0
                 .set_with_forced_indent(name, value, &indent_pattern, Some(FILES_FIELD_ORDER));
         } else {
@@ -847,7 +847,7 @@ impl FilesParagraph {
             License::Text(text) => encode_field_text(text),
         };
         // Force 1-space indentation for License field according to DEP-5 spec
-        let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+        let indent_pattern = deb822_edit::IndentPattern::Fixed(1);
         self.0
             .set_with_forced_indent("License", &text, &indent_pattern, Some(FILES_FIELD_ORDER));
     }
@@ -860,12 +860,12 @@ impl FilesParagraph {
     /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
         let sort_entries =
-            |a: &deb822_lossless::Entry, b: &deb822_lossless::Entry| -> std::cmp::Ordering {
+            |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
                 let a_key = a.key().unwrap_or_default();
                 let b_key = b.key().unwrap_or_default();
                 let a_pos = FILES_FIELD_ORDER.iter().position(|&k| k == a_key);
@@ -922,7 +922,7 @@ impl LicenseParagraph {
     /// preserve existing or auto-detected indentation.
     pub fn set_field(&mut self, name: &str, value: &str) {
         if name.eq_ignore_ascii_case("License") {
-            let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+            let indent_pattern = deb822_edit::IndentPattern::Fixed(1);
             self.0
                 .set_with_forced_indent(name, value, &indent_pattern, Some(LICENSE_FIELD_ORDER));
         } else {
@@ -985,7 +985,7 @@ impl LicenseParagraph {
             License::Text(text) => encode_field_text(text),
         };
         // Force 1-space indentation for License field according to DEP-5 spec
-        let indent_pattern = deb822_lossless::IndentPattern::Fixed(1);
+        let indent_pattern = deb822_edit::IndentPattern::Fixed(1);
         self.0
             .set_with_forced_indent("License", &text, &indent_pattern, Some(LICENSE_FIELD_ORDER));
     }
@@ -1032,12 +1032,12 @@ impl LicenseParagraph {
     /// * `max_line_length_one_liner` - The maximum line length for one-liner fields
     pub fn wrap_and_sort(
         &mut self,
-        indentation: deb822_lossless::Indentation,
+        indentation: deb822_edit::Indentation,
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
         let sort_entries =
-            |a: &deb822_lossless::Entry, b: &deb822_lossless::Entry| -> std::cmp::Ordering {
+            |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
                 let a_key = a.key().unwrap_or_default();
                 let b_key = b.key().unwrap_or_default();
                 let a_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == a_key);
@@ -1061,7 +1061,7 @@ impl LicenseParagraph {
 
 #[cfg(test)]
 mod tests {
-    use deb822_lossless::{TextRange, TextSize};
+    use deb822_edit::{TextRange, TextSize};
 
     #[test]
     fn test_not_machine_readable() {
@@ -2298,7 +2298,7 @@ Upstream-Name: example
         let copyright = s.parse::<super::Copyright>().expect("failed to parse");
         let mut header = copyright.header().unwrap();
 
-        header.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+        header.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, None);
 
         // Verify the exact output with fields in HEADER_FIELD_ORDER
         let expected = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\nUpstream-Name: example\nUpstream-Contact: John Doe\nSource: https://example.com\nComment: Some comment\n";
@@ -2318,7 +2318,7 @@ Files: *
         let copyright = s.parse::<super::Copyright>().expect("failed to parse");
         let mut files = copyright.iter_files().next().unwrap();
 
-        files.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+        files.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, None);
 
         // Verify the exact output with fields in FILES_FIELD_ORDER
         let expected = "Files: *\nCopyright: 2024 Author\nLicense: MIT\nComment: Some comment\n";
@@ -2337,7 +2337,7 @@ License: MIT
         let copyright = s.parse::<super::Copyright>().expect("failed to parse");
         let mut files = copyright.iter_files().next().unwrap();
 
-        files.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+        files.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, None);
 
         // Verify exact file pattern order
         assert_eq!(vec!["*", "src/*", "src/foo/*", "debian/*"], files.files());
@@ -2359,7 +2359,7 @@ License: GPL-3+
         let copyright = s.parse::<super::Copyright>().expect("failed to parse");
         let mut license = copyright.iter_licenses().next().unwrap();
 
-        license.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+        license.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, None);
 
         // Verify the exact output with fields in LICENSE_FIELD_ORDER
         let expected = "License: GPL-3+\n GPL license text here.\nComment: This is a comment\n";
@@ -2393,7 +2393,7 @@ License: MIT
         let mut copyright = s.parse::<super::Copyright>().expect("failed to parse");
 
         // Apply wrap and sort
-        copyright.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+        copyright.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, None);
 
         // Verify exact output with correct paragraph and field ordering
         let expected = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
@@ -2441,7 +2441,7 @@ License: MIT
 "#;
         let mut copyright = s.parse::<super::Copyright>().expect("failed to parse");
 
-        copyright.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, None);
+        copyright.wrap_and_sort(deb822_edit::Indentation::Spaces(1), false, None);
 
         // Verify exact output with sorted patterns
         let expected = r#"Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
@@ -2666,12 +2666,12 @@ License: Apache-2.0
 
 /// Thread-safe parse result for Copyright files, suitable for use in Salsa databases.
 ///
-/// This type wraps `deb822_lossless::Parse<Deb822>` for use in Salsa databases.
+/// This type wraps `deb822_edit::Parse<Deb822>` for use in Salsa databases.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Parse(deb822_lossless::Parse<Deb822>);
+pub struct Parse(deb822_edit::Parse<Deb822>);
 
-impl From<deb822_lossless::Parse<Deb822>> for Parse {
-    fn from(parse: deb822_lossless::Parse<Deb822>) -> Self {
+impl From<deb822_edit::Parse<Deb822>> for Parse {
+    fn from(parse: deb822_edit::Parse<Deb822>) -> Self {
         Parse(parse)
     }
 }
@@ -2730,6 +2730,6 @@ impl Parse {
     }
 }
 
-// Implement Send + Sync since deb822_lossless::Parse implements them
+// Implement Send + Sync since deb822_edit::Parse implements them
 unsafe impl Send for Parse {}
 unsafe impl Sync for Parse {}

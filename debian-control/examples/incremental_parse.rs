@@ -1,5 +1,5 @@
-use deb822_lossless::TextRange;
-use debian_control::lossless::Control;
+use deb822_edit::TextRange;
+use debian_control::edit::Control;
 
 fn main() {
     // Example control file content

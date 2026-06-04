@@ -4,13 +4,13 @@ use rowan::ast::AstNode;
 
 /// Changes file
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Changes(deb822_lossless::Paragraph);
+pub struct Changes(deb822_edit::Paragraph);
 
 /// Errors that can occur when parsing a Changes file.
 #[derive(Debug)]
 pub enum ParseError {
     /// An error occurred while parsing a Deb822 file.
-    Deb822(deb822_lossless::Error),
+    Deb822(deb822_edit::Error),
 
     /// No paragraphs were found in the file.
     NoParagraphs,
@@ -31,8 +31,8 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-impl From<deb822_lossless::Error> for ParseError {
-    fn from(e: deb822_lossless::Error) -> Self {
+impl From<deb822_edit::Error> for ParseError {
+    fn from(e: deb822_edit::Error) -> Self {
         Self::Deb822(e)
     }
 }
@@ -86,8 +86,8 @@ impl Changes {
     /// Parse changes text, returning a Parse result
     ///
     /// Note: This expects a single paragraph, not a full deb822 document
-    pub fn parse(text: &str) -> deb822_lossless::Parse<Changes> {
-        let deb822_parse = deb822_lossless::Deb822::parse(text);
+    pub fn parse(text: &str) -> deb822_edit::Parse<Changes> {
+        let deb822_parse = deb822_edit::Deb822::parse(text);
         let green = deb822_parse.green().clone();
         let mut errors = deb822_parse.errors().to_vec();
 
@@ -102,7 +102,7 @@ impl Changes {
             }
         }
 
-        deb822_lossless::Parse::new(green, errors)
+        deb822_edit::Parse::new(green, errors)
     }
 
     /// Returns the format of the Changes file.
@@ -210,14 +210,14 @@ impl Changes {
 
     /// Create a new Changes file.
     pub fn new() -> Self {
-        let mut slf = Self(deb822_lossless::Paragraph::new());
+        let mut slf = Self(deb822_edit::Paragraph::new());
         slf.set_format("1.8");
         slf
     }
 
     /// Read a Changes file from a file.
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, ParseError> {
-        let deb822 = deb822_lossless::Deb822::from_file(path)?;
+        let deb822 = deb822_edit::Deb822::from_file(path)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -233,7 +233,7 @@ impl Changes {
     pub fn from_file_relaxed<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<(Self, Vec<String>), std::io::Error> {
-        let (mut deb822, mut errors) = deb822_lossless::Deb822::from_file_relaxed(path)?;
+        let (mut deb822, mut errors) = deb822_edit::Deb822::from_file_relaxed(path)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -247,7 +247,7 @@ impl Changes {
 
     /// Read a Changes file from a reader.
     pub fn read<R: std::io::Read>(mut r: R) -> Result<Self, ParseError> {
-        let deb822 = deb822_lossless::Deb822::read(&mut r)?;
+        let deb822 = deb822_edit::Deb822::read(&mut r)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -262,8 +262,8 @@ impl Changes {
     /// Read a Changes file from a reader, allowing syntax errors.
     pub fn read_relaxed<R: std::io::Read>(
         mut r: R,
-    ) -> Result<(Self, Vec<String>), deb822_lossless::Error> {
-        let (mut deb822, mut errors) = deb822_lossless::Deb822::read_relaxed(&mut r)?;
+    ) -> Result<(Self, Vec<String>), deb822_edit::Error> {
+        let (mut deb822, mut errors) = deb822_edit::Deb822::read_relaxed(&mut r)?;
         let mut paras = deb822.paragraphs();
         let para = match paras.next() {
             Some(para) => para,
@@ -314,16 +314,16 @@ impl<'py> pyo3::FromPyObject<'_, 'py> for Changes {
 }
 
 impl AstNode for Changes {
-    type Language = deb822_lossless::Lang;
+    type Language = deb822_edit::Lang;
 
     fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
-        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+        deb822_edit::Paragraph::can_cast(kind) || deb822_edit::Deb822::can_cast(kind)
     }
 
     fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
-        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+        if let Some(para) = deb822_edit::Paragraph::cast(syntax.clone()) {
             Some(Changes(para))
-        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+        } else if let Some(deb822) = deb822_edit::Deb822::cast(syntax) {
             deb822.paragraphs().next().map(Changes)
         } else {
             None
