@@ -9,17 +9,17 @@ use crate::lossless::relations::Relations;
 use rowan::ast::AstNode;
 
 /// A buildinfo file
-pub struct Buildinfo(deb822_lossless::Paragraph);
+pub struct Buildinfo(deb822_edit::Paragraph);
 
-impl From<deb822_lossless::Paragraph> for Buildinfo {
-    fn from(paragraph: deb822_lossless::Paragraph) -> Self {
+impl From<deb822_edit::Paragraph> for Buildinfo {
+    fn from(paragraph: deb822_edit::Paragraph) -> Self {
         Self(paragraph)
     }
 }
 
 impl Default for Buildinfo {
     fn default() -> Self {
-        let mut para = deb822_lossless::Paragraph::new();
+        let mut para = deb822_edit::Paragraph::new();
         para.set("Format", "1.0");
         Self(para)
     }
@@ -28,14 +28,14 @@ impl Default for Buildinfo {
 impl Buildinfo {
     /// Create a new source package
     pub fn new() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_edit::Paragraph::new())
     }
 
     /// Parse buildinfo text, returning a Parse result
     ///
     /// Note: This expects a single paragraph, not a full deb822 document
-    pub fn parse(text: &str) -> deb822_lossless::Parse<Buildinfo> {
-        let deb822_parse = deb822_lossless::Deb822::parse(text);
+    pub fn parse(text: &str) -> deb822_edit::Parse<Buildinfo> {
+        let deb822_parse = deb822_edit::Deb822::parse(text);
         let green = deb822_parse.green().clone();
         let mut errors = deb822_parse.errors().to_vec();
 
@@ -50,7 +50,7 @@ impl Buildinfo {
             }
         }
 
-        deb822_lossless::Parse::new(green, errors)
+        deb822_edit::Parse::new(green, errors)
     }
 
     /// Get the source name
@@ -269,7 +269,7 @@ impl Buildinfo {
 }
 
 impl std::str::FromStr for Buildinfo {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Buildinfo::parse(s).to_result()
@@ -277,16 +277,16 @@ impl std::str::FromStr for Buildinfo {
 }
 
 impl AstNode for Buildinfo {
-    type Language = deb822_lossless::Lang;
+    type Language = deb822_edit::Lang;
 
     fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
-        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+        deb822_edit::Paragraph::can_cast(kind) || deb822_edit::Deb822::can_cast(kind)
     }
 
     fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
-        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+        if let Some(para) = deb822_edit::Paragraph::cast(syntax.clone()) {
             Some(Buildinfo(para))
-        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+        } else if let Some(deb822) = deb822_edit::Deb822::cast(syntax) {
             deb822.paragraphs().next().map(Buildinfo)
         } else {
             None

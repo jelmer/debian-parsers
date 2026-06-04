@@ -1,13 +1,13 @@
 This crate provides a basic proc-macro for converting a Deb822Paragraph
 into a Rust struct and vice versa.
 
-You probably want to use the ``deb822_lossless`` crate instead,
+You probably want to use the ``deb822_edit`` crate instead,
 with the ``derive`` feature enabled.
 
 # Example
 
 ```rust
-use deb822_lossless::Deb822;
+use deb822_edit::Deb822;
 
 #[derive(Deb822)]
 struct Foo {

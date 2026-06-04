@@ -25,5 +25,5 @@ pub mod changes;
 pub mod control;
 pub mod relations;
 pub use control::*;
-pub use deb822_lossless::{Parse, PositionedParseError};
+pub use deb822_edit::{Parse, PositionedParseError};
 pub use relations::*;
