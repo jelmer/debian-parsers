@@ -55,6 +55,12 @@ pub enum SyntaxKind {
     COMMENT,
     /// Package name token
     PACKAGE_NAME,
+    /// Left bracket token for Architecture
+    L_BRACKET,
+    /// Right bracket token for Architecture
+    R_BRACKET,
+    /// Single architecture token
+    ARCH,
     /// Colon token
     COLON,
     /// Package type token
@@ -65,14 +71,12 @@ pub enum SyntaxKind {
     INFO,
     /// Newline token
     NEWLINE,
-
     /// Root node
     ROOT,
     /// Override line node
     OVERRIDE_LINE,
     /// Package specification node
     PACKAGE_SPEC,
-
     /// Error node
     ERROR,
 }
@@ -366,14 +370,10 @@ impl OverrideLine {
         self.syntax.text().to_string()
     }
 
-    /// Get the package type from the package spec (e.g., "source", "binary")
-    /// The package spec can be in format "package-name type:" or just "type:"
+    /// Get the package type from the package spec (e.g., "source", "binary", "udeb")
+    /// The package spec can be in format "package-name type:", "package-name [ archlist ] type", or just "type:"
     pub fn package_type(&self) -> Option<String> {
-        let pkg_name = self.package_spec()?.package_name()?;
-        // The package_name might be "blah source" or just "source"
-        // Split on whitespace and take the last word as the type
-        let parts: Vec<&str> = pkg_name.split_whitespace().collect();
-        parts.last().map(|s| s.to_string())
+        self.package_spec()?.package_type()
     }
 
     /// Check if this override line matches a given issue described by its components.
@@ -401,24 +401,16 @@ impl OverrideLine {
 
         // Check package name and/or type if specified in override
         if let Some(pkg_spec) = self.package_spec() {
+            // Match on package name if the override specifies one.
             if let Some(pkg_name) = pkg_spec.package_name() {
-                let parts: Vec<&str> = pkg_name.split_whitespace().collect();
-
-                if parts.len() == 1 && (parts[0] == "binary" || parts[0] == "source") {
-                    // Just "binary:" or "source:" — match on type only
-                    if Some(parts[0]) != issue_package_type {
-                        return false;
-                    }
-                } else if parts.len() == 2 && (parts[1] == "binary" || parts[1] == "source") {
-                    // "package-name binary:" or "package-name source:"
-                    if Some(parts[0]) != issue_package || Some(parts[1]) != issue_package_type {
-                        return false;
-                    }
-                } else {
-                    // Just a package name without explicit type
-                    if Some(parts[0]) != issue_package {
-                        return false;
-                    }
+                if Some(pkg_name.as_str()) != issue_package {
+                    return false;
+                }
+            }
+            // Match on package type if the override specifies one.
+            if let Some(pkg_type) = pkg_spec.package_type() {
+                if Some(pkg_type.as_str()) != issue_package_type {
+                    return false;
                 }
             }
         }
@@ -475,26 +467,16 @@ impl PackageSpec {
             .find(|it| it.kind() == PACKAGE_TYPE)
             .map(|t| t.text().to_string())
     }
-}
 
-/// Split `s` into alternating runs of non-whitespace and whitespace
-/// characters. Concatenating the returned slices reproduces `s` exactly.
-fn split_runs(s: &str) -> Vec<&str> {
-    let mut runs = Vec::new();
-    let mut start = 0;
-    let mut in_ws = s.starts_with(char::is_whitespace);
-    for (i, c) in s.char_indices() {
-        let here_ws = c.is_whitespace();
-        if here_ws != in_ws {
-            runs.push(&s[start..i]);
-            start = i;
-            in_ws = here_ws;
-        }
+    /// Get all architecture tokens inside the bracket list.
+    pub fn arch_list(&self) -> Vec<String> {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == ARCH)
+            .map(|t| t.text().to_string())
+            .collect()
     }
-    if start < s.len() {
-        runs.push(&s[start..]);
-    }
-    runs
 }
 
 /// Parse a lintian-overrides file
@@ -549,7 +531,7 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
     let mut current_start = 0;
 
     // First, check if we have a package spec by looking for a colon
-    // The package spec format is "package-name:" or "package-name type:"
+    // The package spec format is "package-name:", "package-name type:" or "package-name [ archlist ] type"
     // We need to distinguish this from info that may contain colons (e.g., "line 51:")
     // A package spec will have:
     // 1. A colon followed by whitespace or end-of-line
@@ -562,26 +544,8 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
         let after_colon = &trimmed_start[pos + 1..];
         if after_colon.is_empty() || after_colon.starts_with(char::is_whitespace) {
             // Check if the part before the colon looks like a package spec
-            // It should be 1-2 words (package name, optionally with "source" or "binary")
             let before_colon = &trimmed_start[..pos];
-            let words_before: Vec<&str> = before_colon.split_whitespace().collect();
-
-            // Valid package specs:
-            // - Single word: "source:", "binary:", "package-name:"
-            // - Two words: "source package-name:", "binary package-name:", "package-name source:", "package-name binary:"
-            let is_valid_package_spec = match words_before.len() {
-                1 => true, // Single word is always valid
-                2 => {
-                    // Two words: either first or second must be "source" or "binary"
-                    words_before[0] == "source"
-                        || words_before[0] == "binary"
-                        || words_before[1] == "source"
-                        || words_before[1] == "binary"
-                }
-                _ => false, // More than 2 words is never a valid package spec
-            };
-
-            if is_valid_package_spec {
+            if is_valid_package_spec(before_colon) {
                 // This looks like a valid package spec
                 has_package_spec = true;
                 colon_pos = pos;
@@ -590,36 +554,10 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
     }
 
     if has_package_spec {
-        // Found package spec - parse it into package name and optionally package type
+        // Found package spec - parse it into package name, optional arch list, and optionally package type
         builder.start_node(PACKAGE_SPEC.into());
 
-        let package_spec_text = &trimmed_start[current_start..colon_pos];
-
-        // Walk the spec text run by run so we can emit each word and the
-        // whitespace between them as separate tokens (the previous code
-        // hard-coded a single space and dropped any other interior or
-        // trailing whitespace). Valid spec layouts:
-        //   "package-name", "source", "binary",
-        //   "package-name source", "package-name binary",
-        //   "source package-name", "binary package-name".
-        // In a two-word spec the "source"/"binary" word is the type and the
-        // other is the name; otherwise everything is a name.
-        let runs = split_runs(package_spec_text);
-        let two_words = runs
-            .iter()
-            .filter(|r| !r.starts_with(char::is_whitespace))
-            .count()
-            == 2;
-        for run in runs {
-            let kind = if run.starts_with(char::is_whitespace) {
-                WHITESPACE
-            } else if two_words && (run == "source" || run == "binary") {
-                PACKAGE_TYPE
-            } else {
-                PACKAGE_NAME
-            };
-            builder.token(kind.into(), run);
-        }
+        parse_package_spec_tokens(builder, &trimmed_start[..colon_pos]);
 
         builder.token(COLON.into(), ":");
         builder.finish_node();
@@ -666,6 +604,116 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
     }
 
     builder.finish_node();
+}
+
+/// Check whether the text before a colon is a valid package spec.
+fn is_valid_package_spec(before_colon: &str) -> bool {
+    let mut rest = before_colon.trim();
+    if rest.is_empty() {
+        return false;
+    }
+
+    // Optional package name - any word that is not an arch list opener.
+    if !rest.starts_with('[') {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '[')
+            .unwrap_or(rest.len());
+        rest = rest[end..].trim_start();
+    }
+
+    // Optional architecture list enclosed in brackets.
+    if rest.starts_with('[') {
+        match rest.find(']') {
+            Some(end) => rest = rest[end + 1..].trim_start(),
+            None => return false, // Unclosed bracket
+        }
+    }
+
+    // Optional package type keyword.
+    if !rest.is_empty() {
+        let word = rest.split_whitespace().next().unwrap_or("");
+        if word != "source" && word != "binary" && word != "udeb" {
+            return false;
+        }
+        rest = rest[word.len()..].trim_start();
+    }
+
+    // Nothing should remain after the optional fields.
+    rest.is_empty()
+}
+
+/// Emit CST tokens for the content of a package spec (everything before the colon).
+fn parse_package_spec_tokens(builder: &mut GreenNodeBuilder, spec: &str) {
+    let mut rest = spec;
+
+    // Optional package name - any word before whitespace or '['.
+    let trimmed = rest.trim_start();
+    let leading_ws = &rest[..rest.len() - trimmed.len()];
+    if !leading_ws.is_empty() {
+        builder.token(WHITESPACE.into(), leading_ws);
+    }
+    rest = trimmed;
+
+    if !rest.is_empty() && !rest.starts_with('[') {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '[')
+            .unwrap_or(rest.len());
+        builder.token(PACKAGE_NAME.into(), &rest[..end]);
+        rest = &rest[end..];
+    }
+
+    // Whitespace between package name and '[' or type.
+    let trimmed = rest.trim_start();
+    let ws = &rest[..rest.len() - trimmed.len()];
+    if !ws.is_empty() {
+        builder.token(WHITESPACE.into(), ws);
+    }
+    rest = trimmed;
+
+    // Optional architecture list
+    if rest.starts_with('[') {
+        if let Some(end) = rest.find(']') {
+            builder.token(L_BRACKET.into(), "[");
+
+            // Emit each arch token inside the brackets, preserving whitespace.
+            let mut arch_rest = &rest[1..end];
+            loop {
+                let trimmed_arch = arch_rest.trim_start();
+                let ws = &arch_rest[..arch_rest.len() - trimmed_arch.len()];
+                if !ws.is_empty() {
+                    builder.token(WHITESPACE.into(), ws);
+                }
+                arch_rest = trimmed_arch;
+                if arch_rest.is_empty() {
+                    break;
+                }
+                let arch_end = arch_rest
+                    .find(char::is_whitespace)
+                    .unwrap_or(arch_rest.len());
+                builder.token(ARCH.into(), &arch_rest[..arch_end]);
+                arch_rest = &arch_rest[arch_end..];
+            }
+
+            builder.token(R_BRACKET.into(), "]");
+            rest = &rest[end + 1..];
+        }
+    }
+
+    // Whitespace between ']' and type.
+    let trimmed = rest.trim_start();
+    let ws = &rest[..rest.len() - trimmed.len()];
+    if !ws.is_empty() {
+        builder.token(WHITESPACE.into(), ws);
+    }
+    rest = trimmed;
+
+    // Optional package type: source, binary, or udeb.
+    if !rest.is_empty() {
+        let word = rest.split_whitespace().next().unwrap_or("");
+        if !word.is_empty() {
+            builder.token(PACKAGE_TYPE.into(), word);
+        }
+    }
 }
 
 /// Builder for creating/modifying lintian-overrides files
@@ -1237,6 +1285,125 @@ mod tests {
             "0]\x0b:",
             "foo\tsource:",
             "binary  foo:",
+        ] {
+            let parsed = LintianOverrides::parse(input).tree();
+            assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_arch_list() {
+        let text = "foo [amd64]: some-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        assert!(parsed.errors().is_empty());
+
+        let overrides = parsed.ok().unwrap();
+        let lines: Vec<_> = overrides.lines().collect();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].tag().unwrap().text(), "some-tag");
+        assert_eq!(
+            lines[0].package_spec().unwrap().package_name().unwrap(),
+            "foo"
+        );
+        assert_eq!(lines[0].package_spec().unwrap().arch_list(), vec!["amd64"]);
+    }
+
+    #[test]
+    fn test_parse_arch_list_multiple() {
+        let text = "foo [amd64 arm64]: some-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        assert!(parsed.errors().is_empty());
+
+        let overrides = parsed.ok().unwrap();
+        let lines: Vec<_> = overrides.lines().collect();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].package_spec().unwrap().arch_list(),
+            vec!["amd64", "arm64"]
+        );
+    }
+
+    #[test]
+    fn test_parse_arch_list_negation() {
+        let text = "foo [!amd64]: some-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        assert!(parsed.errors().is_empty());
+
+        let overrides = parsed.ok().unwrap();
+        let lines: Vec<_> = overrides.lines().collect();
+
+        assert_eq!(lines.len(), 1);
+        // The '!' is part of the ARCH token text.
+        assert_eq!(lines[0].package_spec().unwrap().arch_list(), vec!["!amd64"]);
+    }
+
+    #[test]
+    fn test_parse_arch_list_with_type() {
+        let text = "foo [amd64] binary: some-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        assert!(parsed.errors().is_empty());
+
+        let overrides = parsed.ok().unwrap();
+        let lines: Vec<_> = overrides.lines().collect();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0].package_spec().unwrap().package_name().unwrap(),
+            "foo"
+        );
+        assert_eq!(lines[0].package_spec().unwrap().arch_list(), vec!["amd64"]);
+        assert_eq!(
+            lines[0].package_spec().unwrap().package_type().unwrap(),
+            "binary"
+        );
+    }
+
+    #[test]
+    fn test_parse_arch_list_only() {
+        // No package name, just arch list.
+        let text = "[linux-any]: some-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        assert!(parsed.errors().is_empty());
+
+        let overrides = parsed.ok().unwrap();
+        let lines: Vec<_> = overrides.lines().collect();
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].tag().unwrap().text(), "some-tag");
+        assert_eq!(
+            lines[0].package_spec().unwrap().arch_list(),
+            vec!["linux-any"]
+        );
+        assert_eq!(lines[0].package_spec().unwrap().package_name(), None);
+    }
+
+    #[test]
+    fn test_parse_arch_list_no_arch() {
+        // A line without an arch list returns an empty vec.
+        let text = "foo: some-tag\n";
+        let parsed = LintianOverrides::parse(text);
+        assert!(parsed.errors().is_empty());
+
+        let overrides = parsed.ok().unwrap();
+        let lines: Vec<_> = overrides.lines().collect();
+
+        assert_eq!(
+            lines[0].package_spec().unwrap().arch_list(),
+            vec![] as Vec<String>
+        );
+    }
+
+    #[test]
+    fn test_parse_arch_list_roundtrip() {
+        // Arch list must survive a round-trip unchanged.
+        for input in [
+            "foo [amd64]: some-tag\n",
+            "foo [amd64 arm64]: some-tag\n",
+            "foo [!amd64]: some-tag\n",
+            "foo [amd64] binary: some-tag\n",
+            "[linux-any]: some-tag\n",
         ] {
             let parsed = LintianOverrides::parse(input).tree();
             assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
