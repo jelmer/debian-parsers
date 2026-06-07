@@ -321,6 +321,22 @@ impl LintianOverrides {
             .package_name()
     }
 
+    /// Return the (kind, text) of the token at the given offset, if it falls
+    /// on a meaningful token (package name, arch, type, or tag).
+    pub fn token_at_offset(&self, offset: rowan::TextSize) -> Option<(SyntaxKind, String)> {
+        let line = self
+            .lines()
+            .find(|line| line.syntax().text_range().contains(offset))?;
+        line.syntax()
+            .descendants_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|tok| {
+                matches!(tok.kind(), PACKAGE_NAME | ARCH | PACKAGE_TYPE | TAG)
+                    && tok.text_range().contains(offset)
+            })
+            .map(|tok| (tok.kind(), tok.text().to_string()))
+    }
+
     /// Convert back to text
     pub fn text(&self) -> String {
         self.syntax.text().to_string()
