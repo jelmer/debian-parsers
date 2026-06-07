@@ -35,7 +35,7 @@ sequoia-openpgp = { version = "2.0", default-features = false, features = [
 regex = { version = "1.11.1", optional = true }
 itertools = { version = "0.14.0" }
 launchpadlib = { version = "0.5.5", optional = true, default-features = false, features = ["blocking", "api-v1_0", "packages", "keyring"] }
-reqwest = { version = ">=0.12,<0.14", features = ["blocking"], optional = true }
+reqwest = { version = ">=0.12,<0.14", features = ["blocking", "json"], optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 env_logger = { version = "0.11", optional = true }
 log = { version = "0.4", optional = true }
