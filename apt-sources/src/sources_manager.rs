@@ -403,7 +403,7 @@ mod tests {
             uris: vec![Url::parse("http://example.com/ubuntu").unwrap()],
             suites: vec!["focal".to_string()],
             components: Some(vec!["main".to_string()]),
-            architectures: vec!["amd64".to_string()],
+            architectures: Some(vec!["amd64".to_string()]),
             ..Default::default()
         }
     }
