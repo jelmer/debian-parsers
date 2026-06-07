@@ -99,7 +99,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "apt-sources"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "clap",
  "colored",
@@ -111,7 +111,7 @@ dependencies = [
  "launchpadlib",
  "log",
  "regex",
- "reqwest 0.13.3",
+ "reqwest 0.12.28",
  "sequoia-net",
  "sequoia-openpgp",
  "serde_json",
@@ -2780,7 +2780,9 @@ dependencies = [
  "base64",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
+ "futures-util",
  "h2",
  "http",
  "http-body",
