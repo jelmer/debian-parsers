@@ -312,6 +312,15 @@ impl LintianOverrides {
         self.syntax.children().filter_map(OverrideLine::cast)
     }
 
+    /// Return the package name of the override line at the given offset, if any.
+    pub fn package_name_at_offset(&self, offset: rowan::TextSize) -> Option<String> {
+        self.lines()
+            .find(|line| line.syntax().text_range().contains(offset))?
+            .package_spec()
+            .filter(|spec| spec.contains_offset(offset))?
+            .package_name()
+    }
+
     /// Convert back to text
     pub fn text(&self) -> String {
         self.syntax.text().to_string()
@@ -540,6 +549,11 @@ impl PackageSpec {
             .filter(|it| it.kind() == ARCH)
             .map(|t| t.text().to_string())
             .collect()
+    }
+
+    /// Whether the given offset falls within this package spec's text range.
+    pub fn contains_offset(&self, offset: rowan::TextSize) -> bool {
+        self.syntax.text_range().contains(offset)
     }
 }
 
@@ -1445,5 +1459,37 @@ mod tests {
             let parsed = LintianOverrides::parse(input).tree();
             assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
         }
+    }
+    #[test]
+    fn test_package_name_at_offset_on_name() {
+        let text = "libcurl4: hardening-no-pie\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.tree();
+        // offset 3 → inside "libcurl4"
+        let offset = rowan::TextSize::from(3u32);
+        assert_eq!(
+            overrides.package_name_at_offset(offset),
+            Some("libcurl4".to_string())
+        );
+    }
+
+    #[test]
+    fn test_package_name_at_offset_on_tag_returns_none() {
+        let text = "libcurl4: hardening-no-pie\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.tree();
+        // offset 14 → inside "hardening-no-pie", past the PackageSpec
+        let offset = rowan::TextSize::from(14u32);
+        assert_eq!(overrides.package_name_at_offset(offset), None);
+    }
+
+    #[test]
+    fn test_package_name_at_offset_type_keyword_returns_none() {
+        let text = "source: hardening-no-pie\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.tree();
+        // offset 3 → inside "source", which is PACKAGE_TYPE not PACKAGE_NAME
+        let offset = rowan::TextSize::from(3u32);
+        assert_eq!(overrides.package_name_at_offset(offset), None);
     }
 }
