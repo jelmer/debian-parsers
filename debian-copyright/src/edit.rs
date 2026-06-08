@@ -694,19 +694,18 @@ impl Header {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
-        let sort_entries =
-            |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
-                let a_key = a.key().unwrap_or_default();
-                let b_key = b.key().unwrap_or_default();
-                let a_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == a_key);
-                let b_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == b_key);
-                match (a_pos, b_pos) {
-                    (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
-            };
+        let sort_entries = |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
+            let a_key = a.key().unwrap_or_default();
+            let b_key = b.key().unwrap_or_default();
+            let a_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == a_key);
+            let b_pos = HEADER_FIELD_ORDER.iter().position(|&k| k == b_key);
+            match (a_pos, b_pos) {
+                (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        };
         self.0 = self.0.wrap_and_sort(
             indentation,
             immediate_empty_line,
@@ -864,19 +863,18 @@ impl FilesParagraph {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
-        let sort_entries =
-            |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
-                let a_key = a.key().unwrap_or_default();
-                let b_key = b.key().unwrap_or_default();
-                let a_pos = FILES_FIELD_ORDER.iter().position(|&k| k == a_key);
-                let b_pos = FILES_FIELD_ORDER.iter().position(|&k| k == b_key);
-                match (a_pos, b_pos) {
-                    (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
-            };
+        let sort_entries = |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
+            let a_key = a.key().unwrap_or_default();
+            let b_key = b.key().unwrap_or_default();
+            let a_pos = FILES_FIELD_ORDER.iter().position(|&k| k == a_key);
+            let b_pos = FILES_FIELD_ORDER.iter().position(|&k| k == b_key);
+            match (a_pos, b_pos) {
+                (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        };
 
         let format_value = |key: &str, value: &str| -> String {
             if key == "Files" {
@@ -1036,19 +1034,18 @@ impl LicenseParagraph {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
-        let sort_entries =
-            |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
-                let a_key = a.key().unwrap_or_default();
-                let b_key = b.key().unwrap_or_default();
-                let a_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == a_key);
-                let b_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == b_key);
-                match (a_pos, b_pos) {
-                    (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
-                    (Some(_), None) => std::cmp::Ordering::Less,
-                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
-            };
+        let sort_entries = |a: &deb822_edit::Entry, b: &deb822_edit::Entry| -> std::cmp::Ordering {
+            let a_key = a.key().unwrap_or_default();
+            let b_key = b.key().unwrap_or_default();
+            let a_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == a_key);
+            let b_pos = LICENSE_FIELD_ORDER.iter().position(|&k| k == b_key);
+            match (a_pos, b_pos) {
+                (Some(a_idx), Some(b_idx)) => a_idx.cmp(&b_idx),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        };
         self.0 = self.0.wrap_and_sort(
             indentation,
             immediate_empty_line,

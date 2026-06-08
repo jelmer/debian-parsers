@@ -1171,9 +1171,7 @@ impl Parse {
                 ParseInner::LineBased(crate::linebased::parse_watch_file(text))
             }
             #[cfg(feature = "deb822")]
-            Some(WatchFileVersion::Deb822) => {
-                ParseInner::Deb822(deb822_edit::Deb822::parse(text))
-            }
+            Some(WatchFileVersion::Deb822) => ParseInner::Deb822(deb822_edit::Deb822::parse(text)),
             #[cfg(not(feature = "linebased"))]
             Some(WatchFileVersion::LineBased(_)) => {
                 // Fallback to storing text if linebased feature is not enabled
