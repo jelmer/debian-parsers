@@ -83,6 +83,70 @@ pub enum SyntaxKind {
 
 use SyntaxKind::*;
 
+/// The package type keywords valid in a lintian-overrides spec.
+pub const PACKAGE_TYPES: &[&str] = &["source", "binary", "udeb"];
+
+/// The decomposed components of a package specification before `:`
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ParsedSpec<'a> {
+    /// The leading package name, if present.
+    pub package: Option<&'a str>,
+    /// Architectures inside `[ ... ]`, in source order.
+    pub archs: Vec<&'a str>,
+    /// Whether an architecture bracket group was present.
+    pub has_arch_list: bool,
+    /// The package type keyword, if present.
+    pub package_type: Option<&'a str>,
+}
+
+impl ParsedSpec<'_> {
+    /// Whether the spec carries no components at all
+    pub fn is_empty(&self) -> bool {
+        self.package.is_none() && !self.has_arch_list && self.package_type.is_none()
+    }
+}
+
+/// The grammar is positional (`[<package>][ <archlist>][ <type>]`)
+pub fn parse_package_spec(text: &str) -> Option<ParsedSpec<'_>> {
+    let mut spec = ParsedSpec::default();
+    let mut rest = text.trim();
+
+    // Optional package name - but a lone type keyword is a type, not a name.
+    if !rest.is_empty() && !rest.starts_with('[') {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '[')
+            .unwrap_or(rest.len());
+        let word = &rest[..end];
+        let after = rest[end..].trim_start();
+        if PACKAGE_TYPES.contains(&word) && after.is_empty() {
+            spec.package_type = Some(word);
+            return Some(spec);
+        }
+        spec.package = Some(word);
+        rest = after;
+    }
+
+    // Optional architecture list enclosed in brackets.
+    if rest.starts_with('[') {
+        let end = rest.find(']')?;
+        spec.has_arch_list = true;
+        spec.archs = rest[1..end].split_whitespace().collect();
+        rest = rest[end + 1..].trim_start();
+    }
+
+    // Optional package type keyword.
+    if !rest.is_empty() {
+        let word = rest.split_whitespace().next().unwrap_or("");
+        if !PACKAGE_TYPES.contains(&word) {
+            return None;
+        }
+        spec.package_type = Some(word);
+        rest = rest[word.len()..].trim_start();
+    }
+
+    rest.is_empty().then_some(spec)
+}
+
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {
         Self(kind as u16)
@@ -246,6 +310,31 @@ impl LintianOverrides {
     /// Get all override lines
     pub fn lines(&self) -> impl Iterator<Item = OverrideLine> + '_ {
         self.syntax.children().filter_map(OverrideLine::cast)
+    }
+
+    /// Return the package name of the override line at the given offset, if any.
+    pub fn package_name_at_offset(&self, offset: rowan::TextSize) -> Option<String> {
+        self.lines()
+            .find(|line| line.syntax().text_range().contains(offset))?
+            .package_spec()
+            .filter(|spec| spec.contains_offset(offset))?
+            .package_name()
+    }
+
+    /// Return the (kind, text) of the token at the given offset, if it falls
+    /// on a meaningful token (package name, arch, type, or tag).
+    pub fn token_at_offset(&self, offset: rowan::TextSize) -> Option<(SyntaxKind, String)> {
+        let line = self
+            .lines()
+            .find(|line| line.syntax().text_range().contains(offset))?;
+        line.syntax()
+            .descendants_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|tok| {
+                matches!(tok.kind(), PACKAGE_NAME | ARCH | PACKAGE_TYPE | TAG)
+                    && tok.text_range().contains(offset)
+            })
+            .map(|tok| (tok.kind(), tok.text().to_string()))
     }
 
     /// Convert back to text
@@ -477,6 +566,11 @@ impl PackageSpec {
             .map(|t| t.text().to_string())
             .collect()
     }
+
+    /// Whether the given offset falls within this package spec's text range.
+    pub fn contains_offset(&self, offset: rowan::TextSize) -> bool {
+        self.syntax.text_range().contains(offset)
+    }
 }
 
 /// Parse a lintian-overrides file
@@ -545,7 +639,8 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
         if after_colon.is_empty() || after_colon.starts_with(char::is_whitespace) {
             // Check if the part before the colon looks like a package spec
             let before_colon = &trimmed_start[..pos];
-            if is_valid_package_spec(before_colon) {
+            // Check whether the text before a colon is a valid package spec.
+            if parse_package_spec(before_colon).is_some_and(|spec| !spec.is_empty()) {
                 // This looks like a valid package spec
                 has_package_spec = true;
                 colon_pos = pos;
@@ -606,42 +701,6 @@ fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<Stri
     builder.finish_node();
 }
 
-/// Check whether the text before a colon is a valid package spec.
-fn is_valid_package_spec(before_colon: &str) -> bool {
-    let mut rest = before_colon.trim();
-    if rest.is_empty() {
-        return false;
-    }
-
-    // Optional package name - any word that is not an arch list opener.
-    if !rest.starts_with('[') {
-        let end = rest
-            .find(|c: char| c.is_whitespace() || c == '[')
-            .unwrap_or(rest.len());
-        rest = rest[end..].trim_start();
-    }
-
-    // Optional architecture list enclosed in brackets.
-    if rest.starts_with('[') {
-        match rest.find(']') {
-            Some(end) => rest = rest[end + 1..].trim_start(),
-            None => return false, // Unclosed bracket
-        }
-    }
-
-    // Optional package type keyword.
-    if !rest.is_empty() {
-        let word = rest.split_whitespace().next().unwrap_or("");
-        if word != "source" && word != "binary" && word != "udeb" {
-            return false;
-        }
-        rest = rest[word.len()..].trim_start();
-    }
-
-    // Nothing should remain after the optional fields.
-    rest.is_empty()
-}
-
 /// Emit CST tokens for the content of a package spec (everything before the colon).
 fn parse_package_spec_tokens(builder: &mut GreenNodeBuilder, spec: &str) {
     let mut rest = spec;
@@ -658,7 +717,13 @@ fn parse_package_spec_tokens(builder: &mut GreenNodeBuilder, spec: &str) {
         let end = rest
             .find(|c: char| c.is_whitespace() || c == '[')
             .unwrap_or(rest.len());
-        builder.token(PACKAGE_NAME.into(), &rest[..end]);
+        let word = &rest[..end];
+        // A lone type keyword fills the <type> slot, not <package>
+        if PACKAGE_TYPES.contains(&word) && rest[end..].trim_start().is_empty() {
+            builder.token(PACKAGE_TYPE.into(), word);
+            return;
+        }
+        builder.token(PACKAGE_NAME.into(), word);
         rest = &rest[end..];
     }
 
@@ -1169,8 +1234,10 @@ mod tests {
             lines[0].info(),
             Some("X-Python-Version: >= 2.5".to_string())
         );
+
+        assert_eq!(lines[0].package_spec().unwrap().package_name(), None);
         assert_eq!(
-            lines[0].package_spec().unwrap().package_name().unwrap(),
+            lines[0].package_spec().unwrap().package_type().unwrap(),
             "source"
         );
     }
@@ -1408,5 +1475,37 @@ mod tests {
             let parsed = LintianOverrides::parse(input).tree();
             assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
         }
+    }
+    #[test]
+    fn test_package_name_at_offset_on_name() {
+        let text = "libcurl4: hardening-no-pie\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.tree();
+        // offset 3 → inside "libcurl4"
+        let offset = rowan::TextSize::from(3u32);
+        assert_eq!(
+            overrides.package_name_at_offset(offset),
+            Some("libcurl4".to_string())
+        );
+    }
+
+    #[test]
+    fn test_package_name_at_offset_on_tag_returns_none() {
+        let text = "libcurl4: hardening-no-pie\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.tree();
+        // offset 14 → inside "hardening-no-pie", past the PackageSpec
+        let offset = rowan::TextSize::from(14u32);
+        assert_eq!(overrides.package_name_at_offset(offset), None);
+    }
+
+    #[test]
+    fn test_package_name_at_offset_type_keyword_returns_none() {
+        let text = "source: hardening-no-pie\n";
+        let parsed = LintianOverrides::parse(text);
+        let overrides = parsed.tree();
+        // offset 3 → inside "source", which is PACKAGE_TYPE not PACKAGE_NAME
+        let offset = rowan::TextSize::from(3u32);
+        assert_eq!(overrides.package_name_at_offset(offset), None);
     }
 }
