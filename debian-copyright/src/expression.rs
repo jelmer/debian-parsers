@@ -48,7 +48,7 @@ impl LicenseExpr {
         if tokens.is_empty() {
             return LicenseExpr::Name(String::new());
         }
-        parse_expr(&tokens)
+        parse_expr(input, &tokens)
     }
 
     /// Returns the individual license names contained in this expression.
@@ -59,6 +59,56 @@ impl LicenseExpr {
         let mut names = Vec::new();
         self.collect_names(&mut names);
         names
+    }
+
+    /// Locate each license name in `input` along with its byte range.
+    ///
+    /// Returns each license name paired with the half-open byte range it
+    /// occupies in `input`. Exception words after `with` are skipped, matching
+    /// [`license_names`](Self::license_names). Unlike `license_names`, no
+    /// entry is emitted for expressions that contain no name token, since
+    /// there is no meaningful range to report.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use debian_copyright::LicenseExpr;
+    ///
+    /// let input = "GPL-2+ or MIT";
+    /// assert_eq!(
+    ///     LicenseExpr::name_ranges(input),
+    ///     vec![("GPL-2+", 0..6), ("MIT", 10..13)],
+    /// );
+    ///
+    /// let input = "GPL-2+ with OpenSSL-exception or MIT";
+    /// assert_eq!(
+    ///     LicenseExpr::name_ranges(input),
+    ///     vec![("GPL-2+", 0..6), ("MIT", 33..36)],
+    /// );
+    /// ```
+    pub fn name_ranges(input: &str) -> Vec<(&str, std::ops::Range<usize>)> {
+        let tokens = tokenize(input);
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < tokens.len() {
+            match &tokens[i].kind {
+                TokenKind::Word => {
+                    let range = tokens[i].range.clone();
+                    out.push((&input[range.clone()], range));
+                    i += 1;
+                    if matches!(tokens.get(i).map(|t| &t.kind), Some(TokenKind::With)) {
+                        i += 1;
+                        while matches!(tokens.get(i).map(|t| &t.kind), Some(TokenKind::Word)) {
+                            i += 1;
+                        }
+                    }
+                }
+                _ => {
+                    i += 1;
+                }
+            }
+        }
+        out
     }
 
     fn collect_names<'a>(&'a self, names: &mut Vec<&'a str>) {
@@ -101,38 +151,63 @@ impl std::fmt::Display for LicenseExpr {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-enum Token {
-    Word(String),
+#[derive(Debug, PartialEq, Eq, Clone)]
+enum TokenKind {
+    Word,
     Or,
     And,
     With,
     Comma,
 }
 
+#[derive(Debug, Clone)]
+struct Token {
+    kind: TokenKind,
+    range: std::ops::Range<usize>,
+}
+
 fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
-    for word in input.split_whitespace() {
-        let (word, has_comma) = if let Some(stripped) = word.strip_suffix(',') {
-            (stripped, true)
-        } else {
-            (word, false)
-        };
-
-        if !word.is_empty() {
-            if word.eq_ignore_ascii_case("or") {
-                tokens.push(Token::Or);
-            } else if word.eq_ignore_ascii_case("and") {
-                tokens.push(Token::And);
-            } else if word.eq_ignore_ascii_case("with") {
-                tokens.push(Token::With);
-            } else {
-                tokens.push(Token::Word(word.to_string()));
-            }
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+            i += 1;
         }
-
-        if has_comma {
-            tokens.push(Token::Comma);
+        if i >= bytes.len() {
+            break;
+        }
+        let start = i;
+        while i < bytes.len() && !(bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+        let mut end = i;
+        let mut trailing_comma = false;
+        if end > start && bytes[end - 1] == b',' {
+            trailing_comma = true;
+            end -= 1;
+        }
+        if end > start {
+            let word = &input[start..end];
+            let kind = if word.eq_ignore_ascii_case("or") {
+                TokenKind::Or
+            } else if word.eq_ignore_ascii_case("and") {
+                TokenKind::And
+            } else if word.eq_ignore_ascii_case("with") {
+                TokenKind::With
+            } else {
+                TokenKind::Word
+            };
+            tokens.push(Token {
+                kind,
+                range: start..end,
+            });
+        }
+        if trailing_comma {
+            tokens.push(Token {
+                kind: TokenKind::Comma,
+                range: end..end + 1,
+            });
         }
     }
     tokens
@@ -140,26 +215,29 @@ fn tokenize(input: &str) -> Vec<Token> {
 
 /// Parse a single license term: a name optionally followed by `with <exception>`.
 /// The exception after `with` consumes all words until the next `or`, `and`, comma, or end.
-fn parse_term(tokens: &[Token], pos: &mut usize) -> LicenseExpr {
+fn parse_term(input: &str, tokens: &[Token], pos: &mut usize) -> LicenseExpr {
     let name = match tokens.get(*pos) {
-        Some(Token::Word(w)) => {
+        Some(Token {
+            kind: TokenKind::Word,
+            range,
+        }) => {
+            let w = input[range.clone()].to_string();
             *pos += 1;
-            w.clone()
+            w
         }
         _ => return LicenseExpr::Name(String::new()),
     };
 
-    if matches!(tokens.get(*pos), Some(Token::With)) {
+    if matches!(tokens.get(*pos).map(|t| &t.kind), Some(TokenKind::With)) {
         *pos += 1;
         let mut exception_parts = Vec::new();
-        while *pos < tokens.len() {
-            match &tokens[*pos] {
-                Token::Word(w) => {
-                    exception_parts.push(w.clone());
-                    *pos += 1;
-                }
-                _ => break,
-            }
+        while let Some(Token {
+            kind: TokenKind::Word,
+            range,
+        }) = tokens.get(*pos)
+        {
+            exception_parts.push(input[range.clone()].to_string());
+            *pos += 1;
         }
         LicenseExpr::WithException(name, exception_parts.join(" "))
     } else {
@@ -171,16 +249,17 @@ fn parse_term(tokens: &[Token], pos: &mut usize) -> LicenseExpr {
 ///
 /// Handles comma-lowered precedence by splitting on `, and` / `, or` first,
 /// then parsing each segment with normal precedence (`and` > `or`).
-fn parse_expr(tokens: &[Token]) -> LicenseExpr {
+fn parse_expr(input: &str, tokens: &[Token]) -> LicenseExpr {
     // Split into segments at comma boundaries (comma + operator = low precedence).
-    let mut segments: Vec<(Vec<Token>, Option<Token>)> = Vec::new();
+    let mut segments: Vec<(Vec<Token>, Option<TokenKind>)> = Vec::new();
     let mut current: Vec<Token> = Vec::new();
 
     let mut i = 0;
     while i < tokens.len() {
-        if tokens[i] == Token::Comma {
-            if i + 1 < tokens.len() && matches!(tokens[i + 1], Token::Or | Token::And) {
-                let op = tokens[i + 1].clone();
+        if tokens[i].kind == TokenKind::Comma {
+            if i + 1 < tokens.len() && matches!(tokens[i + 1].kind, TokenKind::Or | TokenKind::And)
+            {
+                let op = tokens[i + 1].kind.clone();
                 segments.push((std::mem::take(&mut current), Some(op)));
                 i += 2;
             } else {
@@ -196,25 +275,22 @@ fn parse_expr(tokens: &[Token]) -> LicenseExpr {
     }
 
     if segments.len() == 1 {
-        return parse_segment(&segments[0].0);
+        return parse_segment(input, &segments[0].0);
     }
 
     // Group segments by their joining low-precedence operator.
     // Low-precedence `and` binds tighter than low-precedence `or`.
-    // First pass: group consecutive And-joined segments.
-    let mut and_groups: Vec<Vec<LicenseExpr>> = vec![vec![parse_segment(&segments[0].0)]];
-    let mut joining_ops: Vec<Token> = Vec::new();
+    let mut and_groups: Vec<Vec<LicenseExpr>> = vec![vec![parse_segment(input, &segments[0].0)]];
 
     for i in 1..segments.len() {
-        let preceding_op = segments[i - 1].1.as_ref().unwrap_or(&Token::Or);
-        if matches!(preceding_op, Token::And) {
+        let preceding_op = segments[i - 1].1.as_ref().unwrap_or(&TokenKind::Or);
+        if matches!(preceding_op, TokenKind::And) {
             and_groups
                 .last_mut()
                 .unwrap()
-                .push(parse_segment(&segments[i].0));
+                .push(parse_segment(input, &segments[i].0));
         } else {
-            joining_ops.push(Token::Or);
-            and_groups.push(vec![parse_segment(&segments[i].0)]);
+            and_groups.push(vec![parse_segment(input, &segments[i].0)]);
         }
     }
 
@@ -237,11 +313,11 @@ fn parse_expr(tokens: &[Token]) -> LicenseExpr {
 }
 
 /// Parse a segment (no comma-lowered operators) with normal precedence: `and` > `or`.
-fn parse_segment(tokens: &[Token]) -> LicenseExpr {
+fn parse_segment(input: &str, tokens: &[Token]) -> LicenseExpr {
     // Split on `or` (lower precedence), then each part on `and`.
     let mut or_groups: Vec<Vec<Token>> = vec![Vec::new()];
     for tok in tokens {
-        if *tok == Token::Or {
+        if tok.kind == TokenKind::Or {
             or_groups.push(Vec::new());
         } else {
             or_groups.last_mut().unwrap().push(tok.clone());
@@ -253,7 +329,7 @@ fn parse_segment(tokens: &[Token]) -> LicenseExpr {
         .map(|group| {
             let mut and_groups: Vec<Vec<Token>> = vec![Vec::new()];
             for tok in &group {
-                if *tok == Token::And {
+                if tok.kind == TokenKind::And {
                     and_groups.push(Vec::new());
                 } else {
                     and_groups.last_mut().unwrap().push(tok.clone());
@@ -264,7 +340,7 @@ fn parse_segment(tokens: &[Token]) -> LicenseExpr {
                 .into_iter()
                 .map(|toks| {
                     let mut pos = 0;
-                    parse_term(&toks, &mut pos)
+                    parse_term(input, &toks, &mut pos)
                 })
                 .collect();
 
@@ -406,6 +482,86 @@ mod tests {
         let input = "GPL-2+ with OpenSSL-exception";
         let expr = LicenseExpr::parse(input);
         assert_eq!(expr.to_string(), input);
+    }
+
+    #[test]
+    fn test_name_ranges_simple() {
+        let input = "MIT";
+        assert_eq!(LicenseExpr::name_ranges(input), vec![("MIT", 0..3)]);
+    }
+
+    #[test]
+    fn test_name_ranges_or() {
+        let input = "GPL-2+ or MIT";
+        assert_eq!(
+            LicenseExpr::name_ranges(input),
+            vec![("GPL-2+", 0..6), ("MIT", 10..13)],
+        );
+    }
+
+    #[test]
+    fn test_name_ranges_and() {
+        let input = "Apache-2.0 and BSD-3-clause";
+        assert_eq!(
+            LicenseExpr::name_ranges(input),
+            vec![("Apache-2.0", 0..10), ("BSD-3-clause", 15..27)],
+        );
+    }
+
+    #[test]
+    fn test_name_ranges_with_exception() {
+        let input = "GPL-2+ with OpenSSL-exception or MIT";
+        assert_eq!(
+            LicenseExpr::name_ranges(input),
+            vec![("GPL-2+", 0..6), ("MIT", 33..36)],
+        );
+    }
+
+    #[test]
+    fn test_name_ranges_multi_word_exception() {
+        let input = "GPL-2+ with Autoconf exception or MIT";
+        assert_eq!(
+            LicenseExpr::name_ranges(input),
+            vec![("GPL-2+", 0..6), ("MIT", 34..37)],
+        );
+    }
+
+    #[test]
+    fn test_name_ranges_comma_lowered() {
+        let input = "A or B, and C";
+        assert_eq!(
+            LicenseExpr::name_ranges(input),
+            vec![("A", 0..1), ("B", 5..6), ("C", 12..13)],
+        );
+    }
+
+    #[test]
+    fn test_name_ranges_empty() {
+        assert_eq!(LicenseExpr::name_ranges(""), Vec::<(&str, _)>::new());
+        assert_eq!(LicenseExpr::name_ranges("   "), Vec::<(&str, _)>::new());
+    }
+
+    #[test]
+    fn test_name_ranges_matches_license_names() {
+        let cases = [
+            "GPL-2+ or MIT",
+            "Apache-2.0 and BSD-3-clause",
+            "GPL-2+ with OpenSSL-exception or MIT",
+            "A or B, and C",
+            "GPL-1+ or Artistic or Perl",
+        ];
+        for input in cases {
+            let from_expr: Vec<String> = LicenseExpr::parse(input)
+                .license_names()
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            let from_ranges: Vec<String> = LicenseExpr::name_ranges(input)
+                .into_iter()
+                .map(|(n, _)| n.to_owned())
+                .collect();
+            assert_eq!(from_ranges, from_expr, "mismatch for input {input:?}");
+        }
     }
 
     #[test]
