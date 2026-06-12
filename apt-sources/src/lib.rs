@@ -265,7 +265,7 @@ pub struct Repository {
 
     /// (Optional) Architectures binaries from this repository run on
     #[deb822(field = "Architectures", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
-    pub architectures: Vec<String>,
+    pub architectures: Option<Vec<String>>,
     /// (Optional) Translations support to download
     #[deb822(field = "Languages", deserialize_with = deserialize_string_chain, serialize_with = serialize_string_chain)]
     pub languages: Option<Vec<String>>, // TODO: Option is redundant to empty vectors
@@ -327,7 +327,7 @@ impl Repository {
 
     /// Returns the repository architectures
     pub fn architectures(&self) -> &[String] {
-        &self.architectures
+        self.architectures.as_deref().unwrap_or(&[])
     }
 }
 
@@ -625,6 +625,24 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_without_architectures() {
+        // Architectures is optional; Debian's own default .sources omits it.
+        let s = indoc! {r#"
+            Types: deb
+            URIs: http://deb.debian.org/debian
+            Suites: trixie
+            Components: main
+            Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
+        "#};
+
+        let repos = s
+            .parse::<Repositories>()
+            .expect("Shall be parsed flawlessly");
+        assert_eq!(repos[0].architectures, None);
+        assert_eq!(repos[0].architectures(), &[] as &[String]);
+    }
+
+    #[test]
     fn test_parse_w_keyblock() {
         let s = indoc!(
             r#"
@@ -680,7 +698,7 @@ mod tests {
         let repos = Repositories::new([Repository {
             enabled: Some(true), // TODO: looks odd, as only `Enabled: no` in meaningful
             types: HashSet::from([RepositoryType::Binary]),
-            architectures: vec!["arm64".to_owned()],
+            architectures: Some(vec!["arm64".to_owned()]),
             uris: vec![Url::from_str("https://deb.debian.org/debian").unwrap()],
             suites: vec!["jammy".to_owned()],
             components: Some(vec!["main".to_owned()]),
@@ -747,7 +765,7 @@ mod tests {
             uris: vec![Url::parse("http://example.com/debian").unwrap()],
             suites: vec!["stable".to_string()],
             components: Some(vec!["main".to_string(), "contrib".to_string()]),
-            architectures: vec!["amd64".to_string(), "arm64".to_string()],
+            architectures: Some(vec!["amd64".to_string(), "arm64".to_string()]),
             ..Default::default()
         };
 

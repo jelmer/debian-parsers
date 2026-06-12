@@ -6,7 +6,7 @@ license = "Apache-2.0"
 description = "A lossless parser for deb822 files"
 repository = { workspace = true }
 homepage = { workspace = true }
-version = "0.5.15"
+version = "0.5.17"
 keywords = ["debian", "deb822", "control", "rfc822", "edit"]
 categories = ["parser-implementations"]
 include = ["bench/Sources", "src/*.rs", "bench/*.rs", "examples/*.rs"]

@@ -37,6 +37,86 @@ use crate::lossless::relations::Relations;
 use deb822_lossless::{Deb822, Paragraph, TextRange};
 use rowan::ast::AstNode;
 
+/// A parsed `Name <email>` identity from a `Maintainer:` or `Uploaders:` field,
+/// with the byte range of the email address inside the source document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Identity {
+    /// The name part (may be empty for bare-email entries).
+    pub name: String,
+    /// The email address (with no surrounding angle brackets).
+    pub email: String,
+    /// The text range of the email inside the source document.
+    pub email_range: TextRange,
+}
+
+fn identities_in_field(paragraph: &Paragraph, field: &str) -> Vec<Identity> {
+    let Some(entry) = paragraph.get_entry(field) else {
+        return Vec::new();
+    };
+    // Collect each VALUE token alongside its absolute start offset. Joining the
+    // texts with `\n` between continuation lines yields a string whose byte
+    // layout maps back to absolute offsets via a per-segment lookup table.
+    use deb822_lossless::SyntaxKind;
+    use rowan::ast::AstNode;
+    let mut joined = String::new();
+    let mut segments: Vec<(usize, u32)> = Vec::new(); // (joined_offset, absolute_start)
+    for tok in entry
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|it| it.into_token())
+        .filter(|t| t.kind() == SyntaxKind::VALUE)
+    {
+        let absolute: u32 = tok.text_range().start().into();
+        if !joined.is_empty() {
+            joined.push('\n');
+        }
+        segments.push((joined.len(), absolute));
+        joined.push_str(tok.text());
+    }
+    if joined.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cursor: usize = 0;
+    for piece in joined.split(',') {
+        let piece_offset = cursor;
+        cursor += piece.len() + 1;
+        let Ok((name, email)) = crate::parse_identity(piece.trim()) else {
+            continue;
+        };
+        if email.is_empty() {
+            continue;
+        }
+        let Some(rel) = piece.find(email) else {
+            continue;
+        };
+        let email_joined_start = piece_offset + rel;
+        let Some(absolute_start) = joined_offset_to_absolute(&segments, email_joined_start) else {
+            continue;
+        };
+        out.push(Identity {
+            name: name.to_string(),
+            email: email.to_string(),
+            email_range: TextRange::new(
+                absolute_start.into(),
+                (absolute_start + email.len() as u32).into(),
+            ),
+        });
+    }
+    out
+}
+
+fn joined_offset_to_absolute(segments: &[(usize, u32)], joined_offset: usize) -> Option<u32> {
+    let mut last = segments.first()?;
+    for seg in segments {
+        if seg.0 > joined_offset {
+            break;
+        }
+        last = seg;
+    }
+    Some(last.1 + (joined_offset - last.0) as u32)
+}
+
 /// Parsing mode for Relations fields
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseMode {
@@ -100,7 +180,7 @@ pub const BINARY_FIELD_ORDER: &[&str] = &[
     "Description",
 ];
 
-fn format_field(name: &str, value: &str) -> String {
+fn format_field(name: &str, value: &str, max_line_length_one_liner: Option<usize>) -> String {
     match name {
         "Uploaders" => value
             .split(',')
@@ -119,15 +199,28 @@ fn format_field(name: &str, value: &str) -> String {
         | "Enhances"
         | "Pre-Depends"
         | "Breaks" => {
-            // Try to parse and format the relations, but if parsing fails,
-            // preserve the original value to maintain lossless behavior
-            match value.parse::<Relations>() {
-                Ok(relations) => {
-                    let relations = relations.wrap_and_sort();
-                    relations.to_string()
+            // Try to parse and format the relations.  If parsing fails,
+            // preserve the original value to maintain lossless behaviour.
+            let relations = match value.parse::<Relations>() {
+                Ok(r) => r.wrap_and_sort(),
+                Err(_) => return value.to_string(),
+            };
+            let one_line = relations.to_string();
+
+            // If the one-line form would exceed the requested max line
+            // length (including the field name and ": " prefix), join the
+            // parsed entries with ",\n" so rebuild_value will wrap them
+            // one-per-line.
+            if let Some(mll) = max_line_length_one_liner {
+                if name.len() + 2 + one_line.len() > mll {
+                    return relations
+                        .entries()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",\n");
                 }
-                Err(_) => value.to_string(),
             }
+            one_line
         }
         _ => value.to_string(),
     }
@@ -141,6 +234,26 @@ pub struct Control {
 }
 
 impl Control {
+    /// Capture an independent snapshot of this Control file.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree. Subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        Control {
+            deb822: self.deb822.snapshot(),
+            parse_mode: self.parse_mode,
+        }
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent [`Self::snapshot`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        self.deb822.tree_eq(&other.deb822)
+    }
+
     /// Create a new control file with strict parsing
     pub fn new() -> Self {
         Control {
@@ -170,21 +283,6 @@ impl Control {
     /// Return the underlying deb822 object
     pub fn as_deb822(&self) -> &Deb822 {
         &self.deb822
-    }
-
-    /// Create an independent snapshot of this Control file.
-    ///
-    /// This creates a new Control with an independent copy of the underlying
-    /// deb822 data. Modifications to the original will not affect the snapshot
-    /// and vice versa.
-    ///
-    /// This is more efficient than serializing and re-parsing because it reuses
-    /// the GreenNode structure from the rowan tree.
-    pub fn snapshot(&self) -> Self {
-        Control {
-            deb822: self.deb822.snapshot(),
-            parse_mode: self.parse_mode,
-        }
     }
 
     /// Parse control file text, returning a Parse result
@@ -397,6 +495,9 @@ impl Control {
             a.get("Package").cmp(&b.get("Package"))
         };
 
+        let format = |name: &str, value: &str| -> String {
+            format_field(name, value, max_line_length_one_liner)
+        };
         let wrap_paragraph = |p: &Paragraph| -> Paragraph {
             // TODO: Add Source/Package specific wrapping
             // TODO: Add support for wrapping and sorting fields
@@ -405,7 +506,7 @@ impl Control {
                 immediate_empty_line,
                 max_line_length_one_liner,
                 None,
-                Some(&format_field),
+                Some(&format),
             )
         };
 
@@ -605,12 +706,15 @@ impl Source {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
+        let format = |name: &str, value: &str| -> String {
+            format_field(name, value, max_line_length_one_liner)
+        };
         self.paragraph = self.paragraph.wrap_and_sort(
             indentation,
             immediate_empty_line,
             max_line_length_one_liner,
             None,
-            Some(&format_field),
+            Some(&format),
         );
     }
 
@@ -665,6 +769,18 @@ impl Source {
     /// Set the maintainer of the package
     pub fn set_maintainer(&mut self, maintainer: &str) {
         self.set("Maintainer", maintainer);
+    }
+
+    /// Return whether this package is maintained by the Debian QA team.
+    ///
+    /// Orphaned packages have their `Maintainer` field set to
+    /// `Debian QA Group <packages@qa.debian.org>`.
+    pub fn is_qa_package(&self) -> bool {
+        self.maintainer()
+            .as_deref()
+            .and_then(|m| crate::parse_identity(m).ok())
+            .map(|(_, email)| email.eq_ignore_ascii_case("packages@qa.debian.org"))
+            .unwrap_or(false)
     }
 
     /// The build dependencies of the package.
@@ -897,6 +1013,23 @@ impl Source {
                 .join(", ")
                 .as_str(),
         );
+    }
+
+    /// Iterate over the `Name <email>` identities in the `Maintainer:` field.
+    ///
+    /// Each yielded [`Identity`] carries the name, the email, and the
+    /// [`TextRange`] of the email inside the source document (excluding the
+    /// surrounding angle brackets). Entries that lack a valid email are
+    /// skipped.
+    pub fn maintainer_identities(&self) -> Vec<Identity> {
+        identities_in_field(&self.paragraph, "Maintainer")
+    }
+
+    /// Iterate over the comma-separated identities in the `Uploaders:` field.
+    ///
+    /// See [`Self::maintainer_identities`] for the yielded shape.
+    pub fn uploaders_identities(&self) -> Vec<Identity> {
+        identities_in_field(&self.paragraph, "Uploaders")
     }
 
     /// Return the architecture field
@@ -1134,12 +1267,15 @@ impl Binary {
         immediate_empty_line: bool,
         max_line_length_one_liner: Option<usize>,
     ) {
+        let format = |name: &str, value: &str| -> String {
+            format_field(name, value, max_line_length_one_liner)
+        };
         self.paragraph = self.paragraph.wrap_and_sort(
             indentation,
             immediate_empty_line,
             max_line_length_one_liner,
             None,
-            Some(&format_field),
+            Some(&format),
         );
     }
 
@@ -1479,6 +1615,32 @@ impl Binary {
 mod tests {
     use super::*;
     use crate::relations::VersionConstraint;
+
+    #[test]
+    fn maintainer_and_uploaders_identities_have_email_ranges() {
+        let text = "\
+Source: hello
+Maintainer: Alice <alice@example.org>
+Uploaders: Bob <bob@example.org>,
+ Carol <carol@example.org>
+";
+        let control = Control::parse(text).to_result().unwrap();
+        let source = control.source().unwrap();
+
+        let m = source.maintainer_identities();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].name, "Alice");
+        assert_eq!(m[0].email, "alice@example.org");
+        let r = m[0].email_range;
+        assert_eq!(&text[r], "alice@example.org");
+
+        let u = source.uploaders_identities();
+        assert_eq!(u.len(), 2);
+        assert_eq!(u[0].email, "bob@example.org");
+        assert_eq!(u[1].email, "carol@example.org");
+        assert_eq!(&text[u[0].email_range], "bob@example.org");
+        assert_eq!(&text[u[1].email_range], "carol@example.org");
+    }
 
     #[test]
     fn test_source_set_field_ordering() {
@@ -1859,6 +2021,23 @@ Build-Depends: foo, bar (>= 1.0.0)
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_provides(Some(&relations));
         assert!(binary.provides().is_some());
+    }
+
+    #[test]
+    fn test_source_is_qa_package() {
+        let control: Control = "Source: foo\n\n".parse().unwrap();
+        assert!(!control.source().unwrap().is_qa_package());
+
+        let control: Control = "Source: foo\nMaintainer: Jane Packager <jane@example.com>\n\n"
+            .parse()
+            .unwrap();
+        assert!(!control.source().unwrap().is_qa_package());
+
+        let control: Control =
+            "Source: foo\nMaintainer: Debian QA Group <packages@qa.debian.org>\n\n"
+                .parse()
+                .unwrap();
+        assert!(control.source().unwrap().is_qa_package());
     }
 
     #[test]
@@ -2765,6 +2944,78 @@ Architecture: any
         let result = control.source_in_range(range);
         assert!(result.is_some());
         assert_eq!(result.unwrap().name(), Some("test-package".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_and_sort_long_build_depends_wraps_to_one_per_line() {
+        // A Build-Depends value that, on a single line, far exceeds the
+        // requested max_line_length_one_liner must be broken into one
+        // relation per line — matching `wrap-and-sort` behaviour.
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: debhelper-compat (= 13), aaaa, bbbb, cccc, dddd, eeee, ffff, gggg, hhhh, iiii, jjjj
+
+"#;
+        let mut control: Control = input.parse().unwrap();
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+
+        let expected = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: aaaa,
+ bbbb,
+ cccc,
+ dddd,
+ debhelper-compat (= 13),
+ eeee,
+ ffff,
+ gggg,
+ hhhh,
+ iiii,
+ jjjj
+"#;
+        assert_eq!(control.to_string(), expected);
+    }
+
+    #[test]
+    fn test_wrap_and_sort_short_build_depends_stays_one_line() {
+        // A short Build-Depends value that fits within the line length
+        // should remain on a single line.
+        let input = r#"Source: test-package
+Maintainer: Test <test@example.com>
+Build-Depends: debhelper-compat (= 13), foo, bar
+
+"#;
+        let mut control: Control = input.parse().unwrap();
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+
+        // Note: existing behaviour drops the space after the colon for the
+        // one-liner branch in rebuild_value; that is unrelated to this fix.
+        let expected = "Source: test-package\nMaintainer: Test <test@example.com>\nBuild-Depends:bar, debhelper-compat (= 13), foo\n";
+        assert_eq!(control.to_string(), expected);
+    }
+
+    #[test]
+    fn test_wrap_and_sort_long_build_depends_keeps_brackets_intact() {
+        // Each entry stays whole on its line — including the `(...)`,
+        // `[...]` and `<...>` sections — because we emit by parsed entry
+        // rather than splitting the formatted string on commas.
+        // Note: a separate bug in Relation::wrap_and_sort drops the `!` from
+        // architecture restrictions, so we use a plain `[amd64 arm64]` here.
+        let value = "foo (>= 1.0), bar [amd64 arm64], baz <stage1 !nocheck>, qux, quux, corge, grault, garply, waldo, fred";
+        let input = format!(
+            "Source: test-package\nMaintainer: Test <test@example.com>\nBuild-Depends: {}\n\n",
+            value
+        );
+        let mut control: Control = input.parse().unwrap();
+        control.wrap_and_sort(deb822_lossless::Indentation::Spaces(1), false, Some(79));
+        let out = control.to_string();
+        assert!(out.contains("bar [amd64 arm64],\n"), "out was: {}", out);
+        assert!(
+            out.contains(" baz <stage1 !nocheck>,\n"),
+            "out was: {}",
+            out
+        );
+        assert!(out.contains(" foo (>= 1.0),\n"), "out was: {}", out);
     }
 
     #[test]

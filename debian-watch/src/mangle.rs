@@ -108,7 +108,8 @@ pub fn parse_subst_expr(vm: &str) -> Result<MangleExpr, MangleError> {
     }
 
     let delimiter = vm.chars().nth(1).unwrap();
-    let rest = &vm[2..];
+    // Skip past 's' (always one byte) and the delimiter (may be multi-byte).
+    let rest = &vm[1 + delimiter.len_utf8()..];
 
     // Split by unescaped delimiter
     let parts = split_by_unescaped_delimiter(rest, delimiter);
@@ -164,7 +165,7 @@ pub fn parse_transl_expr(vm: &str) -> Result<MangleExpr, MangleError> {
     }
 
     let delimiter = rest.chars().next().unwrap();
-    let rest = &rest[1..];
+    let rest = &rest[delimiter.len_utf8()..];
 
     // Split by unescaped delimiter
     let parts = split_by_unescaped_delimiter(rest, delimiter);
@@ -480,5 +481,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result, "bar baz bar");
+    }
+
+    #[test]
+    fn test_multibyte_delimiter_does_not_panic() {
+        // Regression: slicing the delimiter off used to assume a one-byte
+        // delimiter, which panicked at a non-ASCII char boundary.
+        assert!(parse_subst_expr("s\u{383}foo\u{383}bar\u{383}").is_ok());
+        assert!(parse_transl_expr("tr\u{7d5}]").is_err());
+        // Should return an error, not panic, on malformed multi-byte input.
+        let _ = parse_subst_expr("s\u{383}");
     }
 }

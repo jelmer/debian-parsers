@@ -2,7 +2,7 @@
 name = "debian-control"
 authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
 edition = "2021"
-version = "0.3.8"
+version = "0.3.12"
 license = "Apache-2.0"
 description = "A parser for Debian control files"
 repository = { workspace = true }
@@ -14,7 +14,7 @@ categories = ["parser-implementations"]
 rowan = { version = "0.16", optional = true }
 debversion = ">=0.4.7, <0.6"
 regex = ">=1, <2"
-deb822-lossless = { version = ">=0.5.13, <0.6", path = "../deb822-lossless", optional = true }
+deb822-lossless = { version = ">=0.5.16, <0.6", path = "../deb822-lossless", optional = true }
 deb822-fast = { path = "../deb822-fast", features = ["derive"], version = ">=0.2.0, <0.3" }
 url = ">=2, <3"
 pyo3 = { workspace = true, optional = true }

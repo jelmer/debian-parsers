@@ -2392,13 +2392,31 @@ impl Relation {
     /// assert_eq!(relation.try_name(), Some("samba".to_string()));
     /// ```
     pub fn try_name(&self) -> Option<String> {
-        self.0
-            .children_with_tokens()
-            .find_map(|it| match it {
-                SyntaxElement::Token(token) if token.kind() == IDENT => Some(token),
-                _ => None,
-            })
-            .map(|token| token.text().to_string())
+        self.name_token().map(|token| token.text().to_string())
+    }
+
+    /// Return the text range of the package-name token, if present.
+    ///
+    /// Useful for editor tooling that wants to highlight or attach metadata
+    /// to the package name itself, separate from any version constraint or
+    /// architecture qualifier.
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// let relation: Relation = "samba (>= 4.0)".parse().unwrap();
+    /// let range = relation.name_range().unwrap();
+    /// assert_eq!(&relation.to_string()[range], "samba");
+    /// ```
+    pub fn name_range(&self) -> Option<rowan::TextRange> {
+        self.name_token().map(|token| token.text_range())
+    }
+
+    fn name_token(&self) -> Option<crate::lossless::relations::SyntaxToken> {
+        self.0.children_with_tokens().find_map(|it| match it {
+            SyntaxElement::Token(token) if token.kind() == IDENT => Some(token),
+            _ => None,
+        })
     }
 
     /// Return the name of the package in the relation.
@@ -2651,6 +2669,36 @@ impl Relation {
             }
             ret
         })
+    }
+
+    /// Return an iterator over the text ranges of each build-profile name
+    /// token (the IDENT inside `<...>` groups).
+    ///
+    /// Useful for tooling that wants to highlight, hover over, or navigate
+    /// from a specific profile name. The leading `!` of disabled profiles is
+    /// not included.
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// let relation: Relation = "samba <!nocheck>".parse().unwrap();
+    /// let ranges: Vec<_> = relation.profile_ranges().collect();
+    /// assert_eq!(ranges.len(), 1);
+    /// let r = ranges[0];
+    /// assert_eq!(&relation.to_string()[r], "nocheck");
+    /// ```
+    pub fn profile_ranges(&self) -> impl Iterator<Item = rowan::TextRange> + '_ {
+        self.0
+            .children()
+            .filter(|n| n.kind() == PROFILES)
+            .flat_map(|profile| {
+                profile
+                    .children_with_tokens()
+                    .filter_map(|t| t.into_token())
+                    .filter(|t| t.kind() == IDENT)
+                    .map(|t| t.text_range())
+                    .collect::<Vec<_>>()
+            })
     }
 
     /// Remove this relation

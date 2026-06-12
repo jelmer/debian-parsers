@@ -26,8 +26,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
       - name: Install dependencies (macOS)
         run: |
-          brew install nettle
+          brew install nettle@3
+          echo "PKG_CONFIG_PATH=$(brew --prefix nettle@3)/lib/pkgconfig" >> "$GITHUB_ENV"
           python3 -m pip install --break-system-packages python-debian
+          echo "PYO3_PYTHON=$(which python3)" >> "$GITHUB_ENV"
         if: matrix.os == 'macos-latest'
       - name: Format check
         run: cargo fmt --all -- --check

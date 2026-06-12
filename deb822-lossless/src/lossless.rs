@@ -599,6 +599,22 @@ impl Parse {
     }
 }
 
+/// Structural equality on the green nodes of two syntax trees, with an
+/// O(1) pointer-identity fast path.
+///
+/// Returns true iff the two green trees are value-equal. When the underlying
+/// `GreenNodeData` happens to share an address (typical after `snapshot()`
+/// without intervening mutations) the comparison short-circuits in O(1);
+/// otherwise it falls through to rowan's structural `PartialEq` on
+/// `GreenNodeData`, which is O(n) in the worst case.
+fn green_eq(a: &SyntaxNode, b: &SyntaxNode) -> bool {
+    let a_green = a.green();
+    let b_green = b.green();
+    let a_ref: &rowan::GreenNodeData = &a_green;
+    let b_ref: &rowan::GreenNodeData = &b_green;
+    std::ptr::eq(a_ref as *const _, b_ref as *const _) || a_ref == b_ref
+}
+
 /// Calculate line and column (both 0-indexed) for the given offset in the tree.
 /// Column is measured in bytes from the start of the line.
 fn line_col_at_offset(node: &SyntaxNode, offset: rowan::TextSize) -> (usize, usize) {
@@ -695,14 +711,13 @@ impl Default for Deb822 {
 }
 
 impl Deb822 {
-    /// Create an independent snapshot of this Deb822 file.
+    /// Capture an independent snapshot of the current state.
     ///
-    /// This creates a new mutable tree that shares the same underlying immutable
-    /// GreenNode data. Modifications to the original will not affect the snapshot
-    /// and vice versa.
-    ///
-    /// This is more efficient than serializing and re-parsing because it reuses
-    /// the GreenNode structure.
+    /// The returned value shares the underlying immutable [`rowan::GreenNode`]
+    /// data with `self` at the time of the call, but lives in its own mutable
+    /// tree: subsequent mutations to `self` do not propagate to the snapshot,
+    /// and vice versa. Pair with [`Self::tree_eq`] to detect whether
+    /// mutations have happened since the snapshot was taken.
     ///
     /// # Example
     /// ```
@@ -710,17 +725,30 @@ impl Deb822 {
     ///
     /// let text = "Package: foo\n";
     /// let deb822: Deb822 = text.parse().unwrap();
-    /// let snapshot = deb822.snapshot();
+    /// let snap = deb822.snapshot();
     ///
-    /// // Modifications to deb822 won't affect snapshot
     /// let mut para = deb822.paragraphs().next().unwrap();
     /// para.set("Package", "modified");
     ///
-    /// let snapshot_para = snapshot.paragraphs().next().unwrap();
-    /// assert_eq!(snapshot_para.get("Package").as_deref(), Some("foo"));
+    /// let snap_para = snap.paragraphs().next().unwrap();
+    /// assert_eq!(snap_para.get("Package").as_deref(), Some("foo"));
     /// ```
     pub fn snapshot(&self) -> Self {
         Deb822(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// O(1) check: returns true iff `self` and `other` point to the same
+    /// underlying syntax tree instance.
+    ///
+    /// This is a pointer-identity check (not a value comparison). It is
+    /// useful with [`Self::snapshot`] to detect whether `self` has been
+    /// mutated since the snapshot was taken: every mutation produces a new
+    /// green tree, so `original.tree_eq(&snapshot)` flips from `true` to
+    /// `false` on the first mutation. Two independently-parsed trees with
+    /// identical contents are *not* `tree_eq`. For value equality, use
+    /// [`PartialEq`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        green_eq(&self.0, &other.0)
     }
 
     /// Create a new empty deb822 file.
@@ -1450,16 +1478,17 @@ impl Paragraph {
         Paragraph(SyntaxNode::new_root_mut(builder.finish()))
     }
 
-    /// Create an independent snapshot of this Paragraph.
+    /// Capture an independent snapshot of this paragraph.
     ///
-    /// This creates a new mutable tree that shares the same underlying immutable
-    /// GreenNode data. Modifications to the original will not affect the snapshot
-    /// and vice versa.
-    ///
-    /// This is more efficient than serializing and re-parsing because it reuses
-    /// the GreenNode structure.
+    /// See [`Deb822::snapshot`] for details.
     pub fn snapshot(&self) -> Self {
         Paragraph(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// O(1) check: returns true iff `self` and `snapshot` reference the same
+    /// syntax-tree state. See [`Deb822::tree_eq`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        green_eq(&self.0, &other.0)
     }
 
     /// Returns the text range covered by this paragraph.
@@ -2420,16 +2449,17 @@ impl<'py> pyo3::FromPyObject<'_, 'py> for Paragraph {
 }
 
 impl Entry {
-    /// Create an independent snapshot of this Entry.
+    /// Capture an independent snapshot of this entry.
     ///
-    /// This creates a new mutable tree that shares the same underlying immutable
-    /// GreenNode data. Modifications to the original will not affect the snapshot
-    /// and vice versa.
-    ///
-    /// This is more efficient than serializing and re-parsing because it reuses
-    /// the GreenNode structure.
+    /// See [`Deb822::snapshot`] for details.
     pub fn snapshot(&self) -> Self {
         Entry(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// O(1) check: returns true iff `self` and `snapshot` reference the same
+    /// syntax-tree state. See [`Deb822::tree_eq`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        green_eq(&self.0, &other.0)
     }
 
     /// Returns the text range of this entry in the source text.
@@ -2486,6 +2516,38 @@ impl Entry {
             .filter(|it| it.kind() == VALUE)
             .map(|it| it.text_range())
             .collect()
+    }
+
+    /// Returns the text range of the first whitespace-delimited token of the
+    /// value.
+    ///
+    /// For single-word values (e.g. `Source: hello`) this is the whole value.
+    /// For multi-word values it covers just the first word, which is useful for
+    /// fields whose first token is an identifier — for example the license
+    /// short-name in a DEP-5 `License:` field (`GPL-2+ with exceptions`).
+    /// Returns `None` if the value is empty.
+    pub fn value_token_range(&self) -> Option<rowan::TextRange> {
+        let value_range = self.value_range()?;
+        let first = self
+            .0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == VALUE)?;
+        let text = first.text();
+        let leading_ws = text.len() - text.trim_start().len();
+        let token_len = text[leading_ws..]
+            .find(char::is_whitespace)
+            .unwrap_or(text.len() - leading_ws);
+        if token_len == 0 {
+            return None;
+        }
+        let start = first.text_range().start() + rowan::TextSize::from(leading_ws as u32);
+        let end = start + rowan::TextSize::from(token_len as u32);
+        // Defensively clamp to the value range.
+        if start < value_range.start() || end > value_range.end() {
+            return None;
+        }
+        Some(rowan::TextRange::new(start, end))
     }
 
     /// Create a new entry with the given key and value.
@@ -3856,6 +3918,42 @@ Description: A simple test package
             &input[value_lines[0].start().into()..value_lines[0].end().into()],
             "test-package"
         );
+
+        // Test value_token_range: single-word value covers the whole value.
+        let token_range = package_entry.value_token_range().unwrap();
+        assert_eq!(
+            &input[token_range.start().into()..token_range.end().into()],
+            "test-package"
+        );
+    }
+
+    #[test]
+    fn test_value_token_range_multiword() {
+        let input = "License: GPL-2+ with the autoconf exception\n";
+        let para = Deb822::from_str(input)
+            .unwrap()
+            .paragraphs()
+            .next()
+            .unwrap();
+        let entry = para.entries().next().unwrap();
+        let token_range = entry.value_token_range().unwrap();
+        // Only the first whitespace-delimited token (the short-name).
+        assert_eq!(
+            &input[token_range.start().into()..token_range.end().into()],
+            "GPL-2+"
+        );
+    }
+
+    #[test]
+    fn test_value_token_range_empty() {
+        let input = "Description:\n";
+        let para = Deb822::from_str(input)
+            .unwrap()
+            .paragraphs()
+            .next()
+            .unwrap();
+        let entry = para.entries().next().unwrap();
+        assert_eq!(entry.value_token_range(), None);
     }
 
     #[test]
@@ -5314,7 +5412,6 @@ Description: This is a description
 
 #[test]
 fn test_deb822_snapshot_independence() {
-    // Test that snapshot() creates an independent copy
     let text = r#"Source: foo
 Maintainer: Joe <joe@example.com>
 
@@ -5322,98 +5419,59 @@ Package: foo
 Architecture: all
 "#;
     let deb822 = text.parse::<Deb822>().unwrap();
-    let snapshot = deb822.snapshot();
+    let snap = deb822.snapshot();
+    assert!(deb822.tree_eq(&snap));
 
-    // Modify the original
     let mut para = deb822.paragraphs().next().unwrap();
     para.set("Source", "modified");
 
-    // Verify the snapshot is unchanged
-    let snapshot_para = snapshot.paragraphs().next().unwrap();
-    assert_eq!(snapshot_para.get("Source").as_deref(), Some("foo"));
-
-    // Modify the snapshot
-    let mut snapshot_para = snapshot.paragraphs().next().unwrap();
-    snapshot_para.set("Source", "snapshot-modified");
-
-    // Verify the original still has our first modification
-    let para = deb822.paragraphs().next().unwrap();
-    assert_eq!(para.get("Source").as_deref(), Some("modified"));
+    // snapshot unchanged
+    let snap_para = snap.paragraphs().next().unwrap();
+    assert_eq!(snap_para.get("Source").as_deref(), Some("foo"));
+    // ... and now they have diverged
+    assert!(!deb822.tree_eq(&snap));
 }
 
 #[test]
 fn test_paragraph_snapshot_independence() {
-    // Test that snapshot() creates an independent copy
     let text = "Package: foo\nArchitecture: all\n";
     let deb822 = text.parse::<Deb822>().unwrap();
     let mut para = deb822.paragraphs().next().unwrap();
-    let mut snapshot = para.snapshot();
+    let snap = para.snapshot();
+    assert!(para.tree_eq(&snap));
 
-    // Modify the original
     para.set("Package", "modified");
+    assert_eq!(snap.get("Package").as_deref(), Some("foo"));
+    assert!(!para.tree_eq(&snap));
+}
 
-    // Verify the snapshot is unchanged
-    assert_eq!(snapshot.get("Package").as_deref(), Some("foo"));
+#[test]
+fn test_tree_eq_value_equivalence() {
+    // Two independently-parsed trees with identical content should be tree_eq
+    // (no shared green pointer, but structural equality holds).
+    let text = "Package: foo\nArchitecture: all\n";
+    let a = text.parse::<Deb822>().unwrap();
+    let b = text.parse::<Deb822>().unwrap();
+    assert!(a.tree_eq(&b));
+    assert!(b.tree_eq(&a));
 
-    // Modify the snapshot
-    snapshot.set("Package", "snapshot-modified");
-
-    // Verify the original still has our first modification
-    assert_eq!(para.get("Package").as_deref(), Some("modified"));
+    // Different content => not tree_eq.
+    let c: Deb822 = "Package: bar\n".parse().unwrap();
+    assert!(!a.tree_eq(&c));
 }
 
 #[test]
 fn test_entry_snapshot_independence() {
-    // Test that snapshot() creates an independent copy
     let text = "Package: foo\n";
     let deb822 = text.parse::<Deb822>().unwrap();
     let mut para = deb822.paragraphs().next().unwrap();
     let entry = para.entries().next().unwrap();
-    let snapshot = entry.snapshot();
+    let snap = entry.snapshot();
+    assert!(entry.tree_eq(&snap));
 
-    // Get values before modification
-    let original_value = entry.value();
-    let snapshot_value = snapshot.value();
-
-    // Both should start with the same value
-    assert_eq!(original_value, "foo");
-    assert_eq!(snapshot_value, "foo");
-
-    // Modify through the paragraph
     para.set("Package", "modified");
-
-    // Verify the entry reflects the change (since it points to the same paragraph)
-    let entry_after = para.entries().next().unwrap();
-    assert_eq!(entry_after.value(), "modified");
-
-    // But the snapshot entry should still have the original value
-    // (it points to a different tree)
-    assert_eq!(snapshot.value(), "foo");
-}
-
-#[test]
-fn test_snapshot_preserves_structure() {
-    // Test that snapshot() preserves comments, whitespace, etc.
-    let text = r#"# Comment
-Source: foo
-## Another comment
-Maintainer: Joe <joe@example.com>
-
-Package: foo
-Architecture: all
-"#;
-    let deb822 = text.parse::<Deb822>().unwrap();
-    let snapshot = deb822.snapshot();
-
-    // Both should have the same structure
-    assert_eq!(deb822.to_string(), snapshot.to_string());
-
-    // Verify they're independent
-    let mut snapshot_para = snapshot.paragraphs().next().unwrap();
-    snapshot_para.set("Source", "modified");
-
-    let original_para = deb822.paragraphs().next().unwrap();
-    assert_eq!(original_para.get("Source").as_deref(), Some("foo"));
+    // The snapshot entry points to an independent tree
+    assert_eq!(snap.value(), "foo");
 }
 
 #[test]

@@ -86,6 +86,20 @@ impl std::fmt::Display for Source {
     }
 }
 
+impl Source {
+    /// Return whether this package is maintained by the Debian QA team.
+    ///
+    /// Orphaned packages have their `Maintainer` field set to
+    /// `Debian QA Group <packages@qa.debian.org>`.
+    pub fn is_qa_package(&self) -> bool {
+        self.maintainer
+            .as_deref()
+            .and_then(|m| crate::parse_identity(m).ok())
+            .map(|(_, email)| email.eq_ignore_ascii_case("packages@qa.debian.org"))
+            .unwrap_or(false)
+    }
+}
+
 /// A binary package.
 #[derive(FromDeb822, ToDeb822, Default, Clone, PartialEq)]
 pub struct Binary {
@@ -296,5 +310,28 @@ Description: this is the short description
                     .to_owned()
             )
         );
+    }
+
+    #[test]
+    fn test_is_qa_package() {
+        let control: Control = r#"Source: foo
+Maintainer: Debian QA Group <packages@qa.debian.org>
+"#
+        .parse()
+        .unwrap();
+        assert!(control.source.is_qa_package());
+
+        let control: Control = r#"Source: foo
+Maintainer: Jane Packager <jane@example.com>
+"#
+        .parse()
+        .unwrap();
+        assert!(!control.source.is_qa_package());
+
+        let control: Control = r#"Source: foo
+"#
+        .parse()
+        .unwrap();
+        assert!(!control.source.is_qa_package());
     }
 }

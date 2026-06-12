@@ -110,7 +110,7 @@ pub fn detect_version(content: &str) -> Option<WatchFileVersion> {
 }
 
 /// Parsed watch file that can be either line-based or deb822 format
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParsedWatchFile {
     /// Line-based watch file (v1-4)
     #[cfg(feature = "linebased")]
@@ -121,7 +121,7 @@ pub enum ParsedWatchFile {
 }
 
 /// Parsed watch entry that can be either line-based or deb822 format
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParsedEntry {
     /// Line-based entry (v1-4)
     #[cfg(feature = "linebased")]
@@ -132,6 +132,36 @@ pub enum ParsedEntry {
 }
 
 impl ParsedWatchFile {
+    /// Capture an independent snapshot of this watch file.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree: subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        match self {
+            #[cfg(feature = "linebased")]
+            ParsedWatchFile::LineBased(wf) => ParsedWatchFile::LineBased(wf.snapshot()),
+            #[cfg(feature = "deb822")]
+            ParsedWatchFile::Deb822(wf) => ParsedWatchFile::Deb822(wf.snapshot()),
+        }
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent [`Self::snapshot`].
+    /// Mismatched variants are never considered equal.
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            #[cfg(feature = "linebased")]
+            (ParsedWatchFile::LineBased(a), ParsedWatchFile::LineBased(b)) => a.tree_eq(b),
+            #[cfg(feature = "deb822")]
+            (ParsedWatchFile::Deb822(a), ParsedWatchFile::Deb822(b)) => a.tree_eq(b),
+            #[allow(unreachable_patterns)]
+            _ => false,
+        }
+    }
+
     /// Create a new empty watch file with the specified version.
     ///
     /// - For version 5, creates a deb822-format watch file (requires `deb822` feature)

@@ -55,3 +55,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+Or to perform a three-way merge of changelog files, in the spirit of
+`dpkg-mergechangelogs` but structure-aware -- it merges author sections and
+bullets rather than raw lines, so independent bullets added on each side are
+unioned instead of conflicting (requires the `merge` feature):
+
+```rust
+use debian_changelog::ChangeLog;
+use debian_changelog::merge::{merge_changelogs, MergeOptions};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let old: ChangeLog = std::fs::read_to_string("old/debian/changelog")?.parse()?;
+    let ours: ChangeLog = std::fs::read_to_string("ours/debian/changelog")?.parse()?;
+    let theirs: ChangeLog = std::fs::read_to_string("theirs/debian/changelog")?.parse()?;
+    let result = merge_changelogs(&old, &ours, &theirs, &MergeOptions::new());
+    if result.conflicts {
+        eprintln!("merge produced conflicts");
+    }
+    print!("{}", result.changelog);
+    Ok(())
+}
+```

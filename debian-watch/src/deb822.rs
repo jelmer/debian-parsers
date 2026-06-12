@@ -50,11 +50,11 @@ impl std::fmt::Display for ParseError {
 }
 
 /// A watch file in format 5 (RFC822/deb822 style)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WatchFile(Deb822);
 
 /// An entry in a format 5 watch file
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     paragraph: Paragraph,
     defaults: Option<Paragraph>,
@@ -64,6 +64,19 @@ impl WatchFile {
     /// Returns a reference to the underlying deb822 document.
     pub fn as_deb822(&self) -> &Deb822 {
         &self.0
+    }
+
+    /// Capture an independent snapshot of this watch file.
+    /// See [`crate::parse::ParsedWatchFile::snapshot`] for semantics.
+    pub fn snapshot(&self) -> Self {
+        WatchFile(self.0.snapshot())
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent `snapshot()`.
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        self.0.tree_eq(&other.0)
     }
 
     /// Construct a WatchFile from an already-parsed Deb822 document.

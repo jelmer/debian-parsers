@@ -28,6 +28,8 @@ mod parse;
 use lazy_regex::regex_captures;
 pub mod bugs;
 pub mod changes;
+#[cfg(feature = "merge")]
+pub mod merge;
 pub mod textwrap;
 use crate::parse::{SyntaxNode, SyntaxToken};
 use debversion::Version;
@@ -692,6 +694,11 @@ pub enum SyntaxKind {
     TIMESTAMP,
     MAINTAINER,
     EMAIL,
+
+    /// A single old-style changelog entry, in a pre-1.0 format that predates
+    /// the current changelog syntax. Its header and body are not broken down
+    /// into structured tokens, but each such entry is a node of its own.
+    OLD_ENTRY,
 }
 
 /// Convert our `SyntaxKind` into the rowan `SyntaxKind`.

@@ -2,7 +2,7 @@
 name = "debian-changelog"
 repository = "https://github.com/jelmer/debian-changelog-rs"
 description = "Parser for Debian changelog files"
-version = "0.2.19"
+version = "0.2.24"
 edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"
@@ -13,12 +13,14 @@ chrono = { version = "0.4.44", optional = true }
 debversion = ">=0.4.6, <0.6"
 lazy-regex = ">=3, <4"
 log = "0.4"
+merge3 = { version = "0.2", default-features = false, optional = true }
 rowan = "0.16.1"
 textwrap = "0.16.2"
 whoami = { version = ">=1.5, <2", default-features = false }
 
 [features]
 default = ["chrono"]
+merge = ["dep:merge3"]
 
 [dev-dependencies]
 flate2 = "1.1"
@@ -32,3 +34,7 @@ required-features = ["chrono"]
 [[example]]
 name = "dch"
 required-features = ["chrono"]
+
+[[example]]
+name = "mergechangelogs"
+required-features = ["merge"]

@@ -1,0 +1,39 @@
+[package]
+name = "debian-watch-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.debian-watch]
+path = ".."
+default-features = false
+features = ["linebased", "deb822"]
+
+[[bin]]
+name = "parse_watch"
+path = "fuzz_targets/parse_watch.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_watch_deb822"
+path = "fuzz_targets/parse_watch_deb822.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_mangle"
+path = "fuzz_targets/parse_mangle.rs"
+test = false
+doc = false
+bench = false

@@ -262,7 +262,8 @@ impl From<&LegacyRepository> for super::Repository {
             uris: vec![original.uri.clone()],
             suites: vec![original.suite.clone()],
             components: original.components.clone().into(),
-            architectures: original.architectures.clone(),
+            architectures: (!original.architectures.is_empty())
+                .then_some(original.architectures.clone()),
             languages: (!original.languages.is_empty()).then_some(original.languages.clone()),
             targets: (!original.targets.is_empty()).then_some(original.targets.clone()),
             pdiffs: original.pdiffs,
@@ -286,7 +287,7 @@ impl From<LegacyRepository> for super::Repository {
             uris: vec![original.uri],
             suites: vec![original.suite],
             components: original.components.into(),
-            architectures: original.architectures,
+            architectures: (!original.architectures.is_empty()).then_some(original.architectures),
             languages: (!original.languages.is_empty()).then_some(original.languages),
             targets: (!original.targets.is_empty()).then_some(original.targets),
             pdiffs: original.pdiffs,
@@ -329,7 +330,7 @@ impl From<&super::Repository> for LegacyRepositories {
                         uri: uri.clone(),
                         suite: suite.clone(),
                         components: repo.components.clone().unwrap_or_default(),
-                        architectures: repo.architectures.clone(),
+                        architectures: repo.architectures.clone().unwrap_or_default(),
                         languages: repo.languages.clone().unwrap_or_default(),
                         targets: repo.targets.clone().unwrap_or_default(),
                         pdiffs: repo.pdiffs,
@@ -450,7 +451,7 @@ mod tests {
         Repository {
             enabled: Some(true), // TODO: looks odd, as only `Enabled: no` in meaningful
             types: HashSet::from([RepositoryType::Binary]),
-            architectures: vec!["arm64".to_owned()],
+            architectures: Some(vec!["arm64".to_owned()]),
             uris: vec![Url::from_str("http://debian.beagleboard.org/arm64/").unwrap()],
             suites: vec!["jammy".to_owned()],
             components: Some(vec!["main".to_owned()]),
@@ -624,7 +625,7 @@ mod tests {
             uris: vec!["http://archive.ubuntu.com/ubuntu".parse().unwrap()],
             suites: vec!["jammy".to_string()],
             components: Some(vec!["main".to_string(), "universe".to_string()]),
-            architectures: vec!["amd64".to_string()],
+            architectures: Some(vec!["amd64".to_string()]),
             ..Default::default()
         };
 

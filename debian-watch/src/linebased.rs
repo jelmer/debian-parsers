@@ -689,6 +689,23 @@ impl WatchFile {
         &self.0
     }
 
+    /// Capture an independent snapshot of this watch file.
+    /// See [`crate::parse::ParsedWatchFile::snapshot`] for semantics.
+    pub fn snapshot(&self) -> Self {
+        WatchFile(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent `snapshot()`.
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        let a = self.0.green();
+        let b = other.0.green();
+        let a_ref: &rowan::GreenNodeData = &a;
+        let b_ref: &rowan::GreenNodeData = &b;
+        std::ptr::eq(a_ref as *const _, b_ref as *const _) || a_ref == b_ref
+    }
+
     /// Create a new watch file with specified version
     pub fn new(version: Option<u32>) -> WatchFile {
         let mut builder = GreenNodeBuilder::new();

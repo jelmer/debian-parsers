@@ -696,12 +696,19 @@ fn parse(text: &str) -> Parse<ChangeLog> {
                     Some(COMMENT) => {
                         self.bump();
                     }
+                    Some(IDENTIFIER) if self.line_starts_old_header() => {
+                        // Old-style changelog entries (pre-1.0 format) make up
+                        // the rest of the file. Parse each one into its own
+                        // OLD_ENTRY node instead of erroring on every line.
+                        self.parse_old_entries();
+                        break;
+                    }
                     Some(IDENTIFIER) => {
                         self.parse_entry();
                     }
                     t => {
+                        // `error()` already advances past the offending token.
                         self.error(format!("unexpected token {:?}", t));
-                        self.bump();
                     }
                 }
             }
@@ -710,6 +717,75 @@ fn parse(text: &str) -> Parse<ChangeLog> {
 
             // Turn the builder into a GreenNode
             Parse::new(self.builder.finish(), self.errors)
+        }
+
+        /// Determine whether the next unconsumed line is an old-style
+        /// changelog header, i.e. one that predates the current `package
+        /// (version) distribution; urgency=...` syntax.
+        ///
+        /// A modern header always contains a `VERSION` token and starts with
+        /// an `IDENTIFIER` in the first column. An old-style header (such as
+        /// `1.9.16alpha10-1:` or `Old Changelog:`) starts with an `IDENTIFIER`
+        /// too, but has no `VERSION`; it instead carries an `ERROR` token
+        /// (typically a stray `:`). Indented lines (the body of an entry) and
+        /// blank lines are not headers.
+        fn line_starts_old_header(&self) -> bool {
+            // Tokens are stored in reverse order; walk this line front to back
+            // by iterating the tail of the vec in reverse.
+            let mut line = self.tokens.iter().rev();
+            match line.next() {
+                // A header line must begin in the first column with an
+                // identifier; an INDENT/WHITESPACE start marks a body line,
+                // and a NEWLINE start marks a blank line.
+                Some((IDENTIFIER, _)) => {}
+                _ => return false,
+            }
+            let mut saw_error = false;
+            for (kind, _) in line {
+                match kind {
+                    NEWLINE => break,
+                    VERSION => return false,
+                    ERROR => saw_error = true,
+                    _ => {}
+                }
+            }
+            saw_error
+        }
+
+        /// Parse the remainder of the input as a sequence of `OLD_ENTRY`
+        /// nodes, one per old-style entry, without recording parse errors.
+        ///
+        /// The pre-1.0 formats are too heterogeneous (GNU-style dates,
+        /// `package version Debian rev`, `Changes from version X to Y`, bare
+        /// `version:` headers) to break their headers and bodies down into
+        /// structured tokens. Instead, each entry runs from one old-style
+        /// header line up to (but not including) the next, and is kept as a
+        /// node of its own so callers can iterate over individual entries.
+        fn parse_old_entries(&mut self) {
+            while self.current().is_some() {
+                self.parse_old_entry();
+            }
+        }
+
+        /// Parse a single old-style entry: its header line followed by every
+        /// line up to the next old-style header line or end of input.
+        fn parse_old_entry(&mut self) {
+            self.builder.start_node(OLD_ENTRY.into());
+
+            // Consume the header line, including its trailing newline.
+            while let Some(kind) = self.current() {
+                self.bump();
+                if kind == NEWLINE {
+                    break;
+                }
+            }
+
+            // Consume body lines until the next old-style header or EOF.
+            while self.current().is_some() && !self.line_starts_old_header() {
+                self.bump();
+            }
+
+            self.builder.finish_node();
         }
         /// Advance one token, adding it to the current branch of the tree builder.
         fn bump(&mut self) {
@@ -723,8 +799,11 @@ fn parse(text: &str) -> Parse<ChangeLog> {
         }
 
         fn next(&self) -> Option<SyntaxKind> {
+            // Tokens are stored reversed; the second-to-last entry is the
+            // token *after* the current one. Use checked_sub so debug builds
+            // don't panic when fewer than two tokens remain.
             self.tokens
-                .get(self.tokens.len() - 2)
+                .get(self.tokens.len().checked_sub(2)?)
                 .map(|(kind, _)| *kind)
         }
 
@@ -850,7 +929,6 @@ macro_rules! ast_node {
 }
 
 ast_node!(ChangeLog, ROOT);
-ast_node!(Entry, ENTRY);
 ast_node!(EntryHeader, ENTRY_HEADER);
 ast_node!(EntryBody, ENTRY_BODY);
 ast_node!(EntryFooter, ENTRY_FOOTER);
@@ -1145,6 +1223,27 @@ impl FromIterator<Entry> for ChangeLog {
 }
 
 impl ChangeLog {
+    /// Capture an independent snapshot of this changelog.
+    ///
+    /// The returned value shares the underlying immutable green-node data
+    /// with `self` at the time of the call, but lives in its own mutable
+    /// tree: subsequent mutations to `self` do not propagate to the snapshot.
+    /// Pair with [`Self::tree_eq`] to detect later mutations.
+    pub fn snapshot(&self) -> Self {
+        ChangeLog(SyntaxNode::new_root_mut(self.0.green().into_owned()))
+    }
+
+    /// Returns true iff the syntax trees of `self` and `other` are
+    /// value-equal. An O(1) pointer-identity fast path makes this free for
+    /// trees that still share state with a recent [`Self::snapshot`].
+    pub fn tree_eq(&self, other: &Self) -> bool {
+        let a = self.0.green();
+        let b = other.0.green();
+        let a_ref: &rowan::GreenNodeData = &a;
+        let b_ref: &rowan::GreenNodeData = &b;
+        std::ptr::eq(a_ref as *const _, b_ref as *const _) || a_ref == b_ref
+    }
+
     /// Create a new, empty changelog.
     pub fn new() -> ChangeLog {
         let mut builder = GreenNodeBuilder::new();
@@ -1170,6 +1269,36 @@ impl ChangeLog {
     #[deprecated(since = "0.2.0", note = "use `iter` instead")]
     pub fn entries(&self) -> impl Iterator<Item = Entry> + '_ {
         self.iter()
+    }
+
+    /// Returns an iterator over the old-style entries in the changelog file.
+    ///
+    /// Long-lived packages often end their changelog with pre-1.0 entries in a
+    /// format that predates the current syntax. Each is yielded as an [`Entry`]
+    /// for which [`Entry::is_old_style`] is true. Such entries are also
+    /// returned by [`Self::iter`]; this method is a convenience for callers
+    /// that only care about the old-style ones.
+    pub fn old_entries(&self) -> impl Iterator<Item = Entry> + '_ {
+        self.iter().filter(Entry::is_old_style)
+    }
+
+    /// Returns the verbatim text of any trailing old-style changelog entries.
+    ///
+    /// Long-lived packages often end their changelog with pre-1.0 entries in a
+    /// format that predates the current syntax. Returns `None` if the changelog
+    /// has no such trailing section.
+    pub fn old_entries_text(&self) -> Option<String> {
+        let text: String = self
+            .0
+            .children()
+            .filter(|it| it.kind() == OLD_ENTRY)
+            .map(|node| node.text().to_string())
+            .collect();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
     }
 
     /// Find the entry that contains the given text position.
@@ -1504,6 +1633,30 @@ impl EntryHeader {
         self.try_version().and_then(|r| r.ok())
     }
 
+    /// Returns the text range of the version string inside the entry header,
+    /// excluding the surrounding parentheses.
+    ///
+    /// Returns `None` if the entry has no version token (malformed input).
+    pub fn version_range(&self) -> Option<rowan::TextRange> {
+        self.0.children_with_tokens().find_map(|it| {
+            let token = it.as_token()?;
+            if token.kind() != VERSION {
+                return None;
+            }
+            let r = token.text_range();
+            let s: u32 = r.start().into();
+            let e: u32 = r.end().into();
+            // The VERSION token text is `(<version>)`; strip the parens.
+            if e <= s + 2 {
+                return None;
+            }
+            Some(rowan::TextRange::new(
+                rowan::TextSize::from(s + 1),
+                rowan::TextSize::from(e - 1),
+            ))
+        })
+    }
+
     /// Returns the package name of the entry.
     pub fn package(&self) -> Option<String> {
         self.0.children_with_tokens().find_map(|it| {
@@ -1775,6 +1928,28 @@ impl EntryFooter {
         })
     }
 
+    /// Returns the text range of the email address, excluding the surrounding
+    /// angle brackets.
+    pub fn email_range(&self) -> Option<rowan::TextRange> {
+        self.0.children_with_tokens().find_map(|it| {
+            let token = it.as_token()?;
+            if token.kind() != EMAIL {
+                return None;
+            }
+            let r = token.text_range();
+            let s: u32 = r.start().into();
+            let e: u32 = r.end().into();
+            // EMAIL token text is `<address>`; strip the angle brackets.
+            if e <= s + 2 {
+                return None;
+            }
+            Some(rowan::TextRange::new(
+                rowan::TextSize::from(s + 1),
+                rowan::TextSize::from(e - 1),
+            ))
+        })
+    }
+
     /// Returns the maintainer name from the footer.
     pub fn maintainer(&self) -> Option<String> {
         self.0
@@ -1926,7 +2101,82 @@ impl Maintainer {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+/// A single changelog entry.
+///
+/// This is normally a modern `package (version) distribution; ...` entry, but
+/// it may also be an old-style entry in a pre-1.0 format that predates the
+/// current syntax. For old-style entries the header and body are not broken
+/// down into structured tokens, so accessors such as [`Entry::header`],
+/// [`Entry::version`] and [`Entry::maintainer`] return `None`; use
+/// [`Entry::is_old_style`] to detect them and [`Entry::to_string`] to access
+/// their verbatim text.
+pub struct Entry(SyntaxNode);
+
+impl AstNode for Entry {
+    type Language = Lang;
+
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == ENTRY || kind == OLD_ENTRY
+    }
+
+    fn cast(syntax: SyntaxNode) -> Option<Self> {
+        if Self::can_cast(syntax.kind()) {
+            Some(Self(syntax))
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> &SyntaxNode {
+        &self.0
+    }
+}
+
 impl Entry {
+    #[allow(dead_code)]
+    fn replace_root(&mut self, new_root: SyntaxNode) {
+        self.0 = Self::cast(new_root).unwrap().0;
+    }
+
+    /// Get the line number (0-indexed) where this entry starts.
+    pub fn line(&self) -> usize {
+        line_col_at_offset(&self.0, self.0.text_range().start()).0
+    }
+
+    /// Get the column number (0-indexed, in bytes) where this entry starts.
+    pub fn column(&self) -> usize {
+        line_col_at_offset(&self.0, self.0.text_range().start()).1
+    }
+
+    /// Get both line and column (0-indexed) where this entry starts.
+    ///
+    /// Returns (line, column) where column is measured in bytes from the start
+    /// of the line.
+    pub fn line_col(&self) -> (usize, usize) {
+        line_col_at_offset(&self.0, self.0.text_range().start())
+    }
+}
+
+impl std::fmt::Display for Entry {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(self.0.text().to_string().as_str())
+    }
+}
+
+impl Entry {
+    /// Returns whether this is an old-style entry in a pre-1.0 format that
+    /// predates the current changelog syntax.
+    ///
+    /// Old-style entries are kept verbatim: their header and body are not
+    /// broken down into structured tokens, so the structured accessors
+    /// ([`Entry::header`], [`Entry::version`], [`Entry::maintainer`], etc.)
+    /// return `None`. Use [`Entry::to_string`] to access their text.
+    pub fn is_old_style(&self) -> bool {
+        self.0.kind() == OLD_ENTRY
+    }
+
     /// Returns the header AST node of the entry.
     pub fn header(&self) -> Option<EntryHeader> {
         self.0.children().find_map(EntryHeader::cast)
@@ -1977,6 +2227,12 @@ impl Entry {
         self.try_version().and_then(|r| r.ok())
     }
 
+    /// Returns the text range of the version string inside the entry header,
+    /// excluding the surrounding parentheses.
+    pub fn version_range(&self) -> Option<rowan::TextRange> {
+        self.header().and_then(|h| h.version_range())
+    }
+
     /// Set the version of the entry.
     pub fn set_version(&mut self, version: &Version) {
         if let Some(mut header) = self.header() {
@@ -2009,6 +2265,12 @@ impl Entry {
     /// Returns the email address of the maintainer.
     pub fn email(&self) -> Option<String> {
         self.footer().and_then(|f| f.email())
+    }
+
+    /// Returns the text range of the email address in the footer, excluding
+    /// the surrounding angle brackets.
+    pub fn email_range(&self) -> Option<rowan::TextRange> {
+        self.footer().and_then(|f| f.email_range())
     }
 
     /// Returns the maintainer AST node.
@@ -2367,6 +2629,18 @@ impl Entry {
             (_, Some(false)) => Some(false),
             _ => None,
         }
+    }
+
+    /// Return whether this entry is a team upload.
+    ///
+    /// Team uploads are detected by a "Team upload" marker in the first
+    /// bullet point of the entry's changes. They are numbered (and tagged)
+    /// separately from regular maintainer uploads.
+    pub fn is_team_upload(&self) -> bool {
+        self.change_lines()
+            .find(|l| l.trim_start().starts_with('*'))
+            .map(|line| lazy_regex::regex_is_match!(r"(?i)team upload", &line))
+            .unwrap_or(false)
     }
 
     /// Iterator over changes in this entry grouped by author.
@@ -2811,6 +3085,34 @@ breezy (3.3.3-2) unstable; urgency=medium
 "###,
             cl.to_string()
         );
+    }
+
+    #[test]
+    fn test_is_team_upload() {
+        let team = ChangeLog::read(
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * Team upload.
+  * New upstream release.
+
+ -- Jelmer Vernooij <jelmer@debian.org>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(team.iter().next().unwrap().is_team_upload());
+
+        let regular = ChangeLog::read(
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jelmer Vernooij <jelmer@debian.org>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(!regular.iter().next().unwrap().is_team_upload());
     }
 
     #[test]
@@ -4208,6 +4510,154 @@ baz (1.0-1) unstable; urgency=low
     }
 
     #[test]
+    fn test_parse_old_style_trailing_entries() {
+        // Many long-lived packages (e.g. samba) end their changelog with
+        // pre-1.0 "old-style" entries: a bare `version:` header followed by
+        // indented free-form text. dpkg and python-debian tolerate these; the
+        // parser must not error on them, and must round-trip them verbatim.
+        let input = concat!(
+            "samba (1.9.16p9-1) unstable; urgency=low\n",
+            "\n",
+            "  * upgraded to new upstream version\n",
+            "\n",
+            " -- Klee Dienes <klee@example.com>  Sat, 26 Oct 1996 21:38:20 -0700\n",
+            "\n",
+            "1.9.16alpha10-1:\n",
+            " 960714\n",
+            " * Removed Package_Revision from control file.\n",
+            " * Uses update-inetd now.\n",
+            "\n",
+            "1.9.15p4-1:\n",
+            " 951128\n",
+            " * Upgraded to latest upstream version.\n",
+        );
+        let parsed = ChangeLog::parse(input);
+        assert_eq!(parsed.errors(), Vec::<&str>::new());
+
+        let changelog: ChangeLog = parsed.tree();
+
+        // The modern entry and each old-style entry are returned by iter().
+        let entries: Vec<_> = changelog.iter().collect();
+        assert_eq!(entries.len(), 3);
+
+        assert!(!entries[0].is_old_style());
+        assert_eq!(entries[0].package(), Some("samba".to_string()));
+        assert_eq!(
+            entries[0].version().map(|v| v.to_string()),
+            Some("1.9.16p9-1".to_string())
+        );
+
+        // Old-style entries are split per-entry but kept verbatim, so their
+        // structured accessors return None.
+        assert!(entries[1].is_old_style());
+        assert_eq!(entries[1].package(), None);
+        assert_eq!(entries[1].version(), None);
+        assert_eq!(
+            entries[1].to_string(),
+            concat!(
+                "1.9.16alpha10-1:\n",
+                " 960714\n",
+                " * Removed Package_Revision from control file.\n",
+                " * Uses update-inetd now.\n",
+                "\n",
+            )
+        );
+
+        assert!(entries[2].is_old_style());
+        assert_eq!(
+            entries[2].to_string(),
+            concat!(
+                "1.9.15p4-1:\n",
+                " 951128\n",
+                " * Upgraded to latest upstream version.\n",
+            )
+        );
+
+        // The old_entries() iterator yields just the old-style entries.
+        assert_eq!(changelog.old_entries().count(), 2);
+
+        // The whole file round-trips verbatim.
+        assert_eq!(changelog.to_string(), input);
+
+        // ... and the old-style section is retrievable via old_entries_text().
+        assert_eq!(
+            changelog.old_entries_text(),
+            Some(
+                concat!(
+                    "1.9.16alpha10-1:\n",
+                    " 960714\n",
+                    " * Removed Package_Revision from control file.\n",
+                    " * Uses update-inetd now.\n",
+                    "\n",
+                    "1.9.15p4-1:\n",
+                    " 951128\n",
+                    " * Upgraded to latest upstream version.\n",
+                )
+                .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_old_style_gnu_date_entries() {
+        // GNU-style old entries use an expanded-date header line and a
+        // tab-indented body. Each date line starts a new old-style entry.
+        let input = concat!(
+            "samba (2.0.0-1) unstable; urgency=low\n",
+            "\n",
+            "  * new upstream\n",
+            "\n",
+            " -- A B <a@b.com>  Sat, 26 Oct 1996 21:38:20 -0700\n",
+            "\n",
+            "Old Changelog:\n",
+            "\n",
+            "Wed Oct 26 21:38:20 PDT 1996 Klee Dienes <klee@example.com>\n",
+            "\n",
+            "\t* did stuff\n",
+            "\n",
+            "Mon Jan 1 1996 Someone Else <other@example.com>\n",
+            "\n",
+            "\t* did other stuff\n",
+        );
+        let parsed = ChangeLog::parse(input);
+        assert_eq!(parsed.errors(), Vec::<&str>::new());
+
+        let changelog: ChangeLog = parsed.tree();
+        let entries: Vec<_> = changelog.iter().collect();
+        assert_eq!(entries.len(), 4);
+
+        assert!(!entries[0].is_old_style());
+        assert_eq!(entries[0].package(), Some("samba".to_string()));
+
+        // The "Old Changelog:" marker line is itself an old-style entry.
+        assert!(entries[1].is_old_style());
+        assert_eq!(entries[1].to_string(), "Old Changelog:\n\n");
+
+        assert!(entries[2].is_old_style());
+        assert_eq!(
+            entries[2].to_string(),
+            "Wed Oct 26 21:38:20 PDT 1996 Klee Dienes <klee@example.com>\n\n\t* did stuff\n\n"
+        );
+
+        assert!(entries[3].is_old_style());
+        assert_eq!(
+            entries[3].to_string(),
+            "Mon Jan 1 1996 Someone Else <other@example.com>\n\n\t* did other stuff\n"
+        );
+
+        assert_eq!(changelog.to_string(), input);
+    }
+
+    #[test]
+    fn test_old_entries_text_absent_for_modern_changelog() {
+        let changelog: ChangeLog =
+            "foo (1.0-1) unstable; urgency=low\n\n  * Change\n\n -- Maint <m@example.com>  Mon, 04 Sep 2023 18:13:45 -0500\n"
+                .parse()
+                .unwrap();
+        assert_eq!(changelog.old_entries_text(), None);
+    }
+
+    #[test]
     fn test_parse_real_world_malformed_footer() {
         // Real-world case: first entry has an empty bullet ("  * \n") and a
         // truncated footer line (" \n") instead of " -- maintainer <email>  date".
@@ -4403,5 +4853,125 @@ breezy (3.3.4-1) unstable; urgency=low
 
         // The first entry should differ
         assert_ne!(old_children[0], new_children[0]);
+    }
+
+    #[test]
+    fn test_snapshot_detects_mutation() {
+        let cl: ChangeLog = "foo (1.0) unstable; urgency=low\n\n  * Initial.\n\n -- A B <a@b>  Mon, 01 Jan 2024 00:00:00 +0000\n".parse().unwrap();
+        let snap = cl.snapshot();
+        assert!(cl.tree_eq(&snap));
+
+        let mut entry = cl.iter().next().unwrap();
+        entry.set_package("bar".to_string());
+
+        assert!(!cl.tree_eq(&snap));
+    }
+
+    #[test]
+    fn test_parse_does_not_panic_on_unexpected_tokens() {
+        // Regression: the top-level fallthrough used to call bump() *after*
+        // error() had already consumed the offending token, draining the
+        // token stack and panicking on the next bump. Also covers a
+        // separate `tokens.len() - 2` underflow in `next()` when fewer
+        // than two tokens remain. Both bugs hit `parse_relaxed` and the
+        // strict `FromStr` path equally.
+        for input in ["\x0e", "\x0e=*", ")", "\n\n`", "-;;-=z"] {
+            let _ = ChangeLog::parse_relaxed(input);
+            let _ = ChangeLog::from_str(input);
+        }
+    }
+
+    #[test]
+    fn test_version_range_excludes_parens() {
+        let text = "foo (1.2-3) unstable; urgency=low\n\n  * Change.\n\n -- A B <a@b.example>  Mon, 01 Jan 2024 00:00:00 +0000\n";
+        let cl: ChangeLog = text.parse().unwrap();
+        let entry = cl.iter().next().unwrap();
+
+        let range = entry.version_range().expect("version range present");
+        let s: u32 = range.start().into();
+        let e: u32 = range.end().into();
+        assert_eq!(&text[s as usize..e as usize], "1.2-3");
+
+        // The full VERSION token still includes the parens.
+        let header = entry.header().unwrap();
+        let token_range = header
+            .0
+            .children_with_tokens()
+            .find_map(|it| {
+                let t = it.as_token()?;
+                (t.kind() == VERSION).then(|| t.text_range())
+            })
+            .unwrap();
+        let ts: u32 = token_range.start().into();
+        let te: u32 = token_range.end().into();
+        assert_eq!(&text[ts as usize..te as usize], "(1.2-3)");
+
+        // Entry-level helper agrees with the header-level one.
+        assert_eq!(
+            entry.header().unwrap().version_range(),
+            entry.version_range()
+        );
+    }
+
+    #[test]
+    fn test_email_range_excludes_angle_brackets() {
+        let text = "foo (1.2-3) unstable; urgency=low\n\n  * Change.\n\n -- A B <a@b.example>  Mon, 01 Jan 2024 00:00:00 +0000\n";
+        let cl: ChangeLog = text.parse().unwrap();
+        let entry = cl.iter().next().unwrap();
+
+        let range = entry.email_range().expect("email range present");
+        let s: u32 = range.start().into();
+        let e: u32 = range.end().into();
+        assert_eq!(&text[s as usize..e as usize], "a@b.example");
+
+        // The full EMAIL token still includes the angle brackets.
+        let footer = entry.footer().unwrap();
+        let token_range = footer
+            .0
+            .children_with_tokens()
+            .find_map(|it| {
+                let t = it.as_token()?;
+                (t.kind() == EMAIL).then(|| t.text_range())
+            })
+            .unwrap();
+        let ts: u32 = token_range.start().into();
+        let te: u32 = token_range.end().into();
+        assert_eq!(&text[ts as usize..te as usize], "<a@b.example>");
+
+        assert_eq!(entry.footer().unwrap().email_range(), entry.email_range());
+    }
+
+    #[test]
+    fn test_version_range_second_entry_offsets_from_start() {
+        let text = "foo (1.0-1) unstable; urgency=low\n\n  * First.\n\n -- A B <a@b.example>  Mon, 01 Jan 2024 00:00:00 +0000\n\nfoo (2.0-1) unstable; urgency=low\n\n  * Second.\n\n -- A B <a@b.example>  Tue, 02 Jan 2024 00:00:00 +0000\n";
+        let cl: ChangeLog = text.parse().unwrap();
+        let entries: Vec<_> = cl.iter().collect();
+        assert_eq!(entries.len(), 2);
+
+        let r = entries[1].version_range().unwrap();
+        let s: u32 = r.start().into();
+        let e: u32 = r.end().into();
+        assert_eq!(&text[s as usize..e as usize], "2.0-1");
+    }
+
+    #[test]
+    fn test_version_range_none_for_malformed_header() {
+        // An old-style trailing entry has no VERSION token in its header.
+        let text =
+            "foo unstable; urgency=low\n\n  * Initial release. Closes: #12345\n\n -- John Doe <jd@example.com>  Mon, 01 Jan 2024 00:00:00 +0000\n";
+        let cl = ChangeLog::parse_relaxed(text);
+        let first = cl.iter().next();
+        if let Some(entry) = first {
+            assert_eq!(entry.version_range(), None);
+        }
+    }
+
+    #[test]
+    fn test_email_range_none_when_footer_has_no_email() {
+        // No footer at all — email_range should be None.
+        let text = "foo (1.0-1) unstable; urgency=low\n\n  * Change.\n";
+        let cl = ChangeLog::parse_relaxed(text);
+        let entry = cl.iter().next().unwrap();
+        assert_eq!(entry.email_range(), None);
     }
 }

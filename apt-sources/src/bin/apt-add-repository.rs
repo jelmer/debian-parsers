@@ -667,7 +667,7 @@ fn parse_repository_spec(
         let repository = Repository {
             enabled: Some(true),
             types,
-            architectures: vec![],
+            architectures: None,
             uris: vec![uri],
             suites: vec![codename.to_string()],
             components: Some(components),
@@ -716,7 +716,7 @@ fn parse_repository_spec(
         let mut repository = Repository {
             enabled: Some(true),
             types,
-            architectures: vec![],
+            architectures: None,
             uris: vec![uri.clone()],
             suites: vec![suite],
             components: Some(components),
@@ -759,7 +759,7 @@ fn parse_repository_spec(
     let repository = Repository {
         enabled: Some(true),
         types,
-        architectures: vec![],
+        architectures: None,
         uris: vec![clean_uri.clone()],
         suites: vec![suite],
         components: Some(components),
@@ -854,7 +854,7 @@ fn add_pocket_repository(
     let repository = Repository {
         enabled: Some(true),
         types,
-        architectures: vec![],
+        architectures: None,
         uris: vec![Url::parse(mirror_url).unwrap()],
         suites: vec![pocket_spec.to_string()],
         components: Some(components),
@@ -2260,8 +2260,8 @@ fn print_repository_details(source: &str, path: &Path, format: RepoFormat, repo:
         println!("  Components: {}", components.join(" "));
     }
 
-    if !repo.architectures.is_empty() {
-        println!("  Architectures: {}", repo.architectures.join(" "));
+    if !repo.architectures().is_empty() {
+        println!("  Architectures: {}", repo.architectures().join(" "));
     }
 
     if let Some(signature) = &repo.signature {
@@ -2651,7 +2651,7 @@ mod tests {
             uris: vec![Url::parse("http://example.com/repo").unwrap()],
             suites: vec!["focal".to_string()],
             components: Some(vec!["main".to_string()]),
-            architectures: vec!["amd64".to_string()],
+            architectures: Some(vec!["amd64".to_string()]),
             ..Default::default()
         };
 

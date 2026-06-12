@@ -302,8 +302,33 @@ impl std::str::FromStr for Relation {
             }
         }
 
+        // Read a `${...}` substvar, with the leading DOLLAR already consumed,
+        // reassembling its literal text (e.g. `${misc:Depends}`).
+        fn read_substvar(
+            tokens: &mut Peekable<impl Iterator<Item = (SyntaxKind, String)>>,
+        ) -> Result<String, String> {
+            let mut text = String::from("$");
+            match tokens.next() {
+                Some((L_CURLY, s)) => text.push_str(&s),
+                _ => return Err("Expected '{' after '$' in substvar".to_string()),
+            }
+            loop {
+                match tokens.next() {
+                    Some((R_CURLY, s)) => {
+                        text.push_str(&s);
+                        return Ok(text);
+                    }
+                    Some((_, s)) => text.push_str(&s),
+                    None => return Err("Unterminated substvar".to_string()),
+                }
+            }
+        }
+
+        // A relation's name is either a package name or a substvar like
+        // `${misc:Depends}` (valid in control fields such as Depends).
         let name = match tokens.next() {
             Some((IDENT, name)) => name,
+            Some((DOLLAR, _)) => read_substvar(&mut tokens)?,
             _ => return Err("Expected package name".to_string()),
         };
 
@@ -605,6 +630,26 @@ mod tests {
                 "0.20.21".parse().unwrap()
             ))
         );
+    }
+
+    #[test]
+    fn test_substvar() {
+        // A relation that is a substvar (common in Depends fields) parses with
+        // the substvar as its name and round-trips.
+        let input = "${misc:Depends}";
+        let parsed: Relations = input.parse().unwrap();
+        assert_eq!(parsed.to_string(), input);
+        assert_eq!(parsed.len(), 1);
+        let relation = &parsed[0][0];
+        assert_eq!(relation.name, "${misc:Depends}");
+        assert_eq!(relation.version, None);
+
+        // Mixed with ordinary relations across a list.
+        let input = "${misc:Depends}, python3-dulwich (>= 0.20)";
+        let parsed: Relations = input.parse().unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0][0].name, "${misc:Depends}");
+        assert_eq!(parsed[1][0].name, "python3-dulwich");
     }
 
     #[test]
