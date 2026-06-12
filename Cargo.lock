@@ -111,7 +111,7 @@ dependencies = [
  "launchpadlib",
  "log",
  "regex",
- "reqwest 0.12.28",
+ "reqwest 0.13.3",
  "sequoia-net",
  "sequoia-openpgp",
  "serde_json",
@@ -744,6 +744,7 @@ dependencies = [
  "chrono",
  "deb822-fast",
  "deb822-lossless",
+ "patchkit",
  "url",
 ]
 
@@ -2289,6 +2290,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "patchkit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a51b68b673c1e17986afb0071ce891b2cabef59ce6715978448f195d699aa57"
+dependencies = [
+ "chrono",
+ "lazy-regex",
+ "lazy_static",
+ "once_cell",
+ "proc-macro2",
+ "regex",
+ "rowan",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2780,9 +2796,7 @@ dependencies = [
  "base64",
  "bytes",
  "encoding_rs",
- "futures-channel",
  "futures-core",
- "futures-util",
  "h2",
  "http",
  "http-body",

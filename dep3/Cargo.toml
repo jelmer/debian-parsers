@@ -13,11 +13,13 @@ categories = ["parser-implementations"]
 chrono = ">=0.4, <0.5"
 deb822-lossless = { path = "../deb822-lossless", version = ">=0.2, <0.6", optional = true }
 deb822-fast = { path = "../deb822-fast", version = ">=0.1, <0.3", features = ["derive"] }
+patchkit = { version = ">=0.3, <0.4", optional = true }
 url = ">=2, <3"
 
 [features]
 default = ["lossless"]
 lossless = ["dep:deb822-lossless"]
+patchkit = ["dep:patchkit"]
 
 [badges]
 maintenance = { status = "actively-maintained" }
