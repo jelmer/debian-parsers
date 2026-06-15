@@ -2,7 +2,7 @@
 name = "debversion"
 version = "0.5.1"
 edition = "2021"
-authors = [ "Jelmer Vernooĳ <jelmer@debian.org>",]
+authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
 license = "Apache-2.0"
 description = "Debian version parsing, manipulation and comparison"
 repository = "https://github.com/jelmer/debversion-rs"
@@ -13,9 +13,9 @@ categories = ["parser-implementations"]
 
 [features]
 default = []
-sqlx = [ "sqlx/postgres",]
-python-debian = [ "dep:pyo3",]
-serde = [ "dep:serde",]
+sqlx = ["sqlx/postgres"]
+python-debian = ["dep:pyo3"]
+serde = ["dep:serde"]
 
 [dependencies]
 chrono = { version = "0.4.38", default-features = false, features = ["alloc"] }
@@ -23,14 +23,14 @@ lazy-regex = "3"
 num-bigint = "0.4.6"
 
 [dependencies.pyo3]
-version = ">=0.27, <0.29"
+workspace = true
 optional = true
 
 [dependencies.sqlx]
 version = "0.8.2"
 optional = true
 default-features = false
-features = [ "postgres",]
+features = ["postgres"]
 
 [dependencies.serde]
 version = "^1"
@@ -39,8 +39,8 @@ optional = true
 [dev-dependencies.sqlx]
 version = "0.8.2"
 default-features = false
-features = [ "runtime-async-std-rustls",]
+features = ["runtime-async-std-rustls"]
 
 [dev-dependencies.pyo3]
-version = ">=0.27, <0.29"
-features = [ "auto-initialize",]
+workspace = true
+features = ["auto-initialize"]
