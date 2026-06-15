@@ -84,6 +84,35 @@ impl PatchHeader {
             _ => None,
         }
     }
+
+    /// The patch synopsis: the first line of the `Description` (or `Subject`)
+    /// field. Per DEP-3 the field carries a one-line synopsis optionally followed
+    /// by a longer description; this returns just the synopsis.
+    pub fn synopsis(&self) -> Option<&str> {
+        self.description
+            .as_deref()
+            .map(|d| d.split('\n').next().unwrap_or(d).trim_end())
+    }
+
+    /// The long description: everything after the synopsis line of the
+    /// `Description` (or `Subject`) field, or `None` when there is only a
+    /// synopsis.
+    ///
+    /// A lone `.` line (the deb822 blank-line marker) is decoded back to an empty
+    /// line, so paragraph breaks read naturally.
+    pub fn long_description(&self) -> Option<String> {
+        let rest = self.description.as_deref()?.split_once('\n').map(|x| x.1)?;
+        let trimmed = rest.trim_matches('\n');
+        if trimmed.is_empty() {
+            return None;
+        }
+        let decoded = trimmed
+            .split('\n')
+            .map(|line| if line == "." { "" } else { line })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(decoded)
+    }
 }
 
 impl std::fmt::Display for PatchHeader {
@@ -197,6 +226,44 @@ Last-Update: 2006-12-21
             header.description,
             Some("Use FHS compliant paths by default\nUpstream is not interested in switching to those paths.\n.\nBut we will continue using them in Debian nevertheless to comply with\nour policy.".to_string())
         );
+    }
+
+    #[test]
+    fn test_synopsis_and_long_description() {
+        let text = r#"Description: Use FHS compliant paths by default
+ Upstream is not interested in switching to those paths.
+ .
+ But we will continue using them in Debian nevertheless.
+Author: John Doe <johndoe@example.com>
+"#;
+        let header: PatchHeader = text.parse().unwrap();
+        assert_eq!(
+            header.synopsis(),
+            Some("Use FHS compliant paths by default")
+        );
+        assert_eq!(
+            header.long_description().as_deref(),
+            Some(
+                "Upstream is not interested in switching to those paths.\n\nBut we will continue using them in Debian nevertheless."
+            )
+        );
+    }
+
+    #[test]
+    fn test_synopsis_only_has_no_long_description() {
+        let text = "Description: A one-line synopsis only\nAuthor: X <x@example.com>\n";
+        let header: PatchHeader = text.parse().unwrap();
+        assert_eq!(header.synopsis(), Some("A one-line synopsis only"));
+        assert_eq!(header.long_description(), None);
+    }
+
+    #[test]
+    fn test_synopsis_from_subject() {
+        // The git-style `Subject` aliases `Description`, so synopsis works too.
+        let text = "Subject: Fix the thing\n Details here.\nFrom: X <x@example.com>\n";
+        let header: PatchHeader = text.parse().unwrap();
+        assert_eq!(header.synopsis(), Some("Fix the thing"));
+        assert_eq!(header.long_description().as_deref(), Some("Details here."));
     }
 
     #[test]
