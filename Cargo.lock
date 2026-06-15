@@ -936,18 +936,6 @@ dependencies = [
 
 [[package]]
 name = "debversion"
-version = "0.5.1"
-dependencies = [
- "chrono",
- "lazy-regex",
- "num-bigint",
- "pyo3",
- "serde",
- "sqlx",
-]
-
-[[package]]
-name = "debversion"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f79ef0d110ecfe7c87db7ff3a87756cd31d601073f440619963bea29f06694dc"
@@ -956,6 +944,18 @@ dependencies = [
  "lazy-regex",
  "num-bigint",
  "serde",
+]
+
+[[package]]
+name = "debversion"
+version = "0.5.3"
+dependencies = [
+ "chrono",
+ "lazy-regex",
+ "num-bigint",
+ "pyo3",
+ "serde",
+ "sqlx",
 ]
 
 [[package]]
