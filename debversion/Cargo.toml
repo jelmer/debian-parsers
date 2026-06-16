@@ -1,6 +1,6 @@
 [package]
 name = "debversion"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 authors = ["Jelmer Vernooĳ <jelmer@debian.org>"]
 license = "Apache-2.0"
