@@ -27,7 +27,7 @@ workspace = true
 optional = true
 
 [dependencies.sqlx]
-version = "0.8.2"
+version = ">=0.8.2,<0.10"
 optional = true
 default-features = false
 features = ["postgres"]
@@ -37,9 +37,9 @@ version = "^1"
 optional = true
 
 [dev-dependencies.sqlx]
-version = "0.8.2"
+version = ">=0.8.2,<0.10"
 default-features = false
-features = ["runtime-async-std-rustls"]
+features = ["runtime-async-std", "tls-rustls"]
 
 [dev-dependencies.pyo3]
 workspace = true
