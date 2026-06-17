@@ -2556,8 +2556,10 @@ impl Relation {
                 }
                 VersionConstraint::GreaterThan => {
                     builder.token(R_ANGLE.into(), ">");
+                    builder.token(R_ANGLE.into(), ">");
                 }
                 VersionConstraint::LessThan => {
+                    builder.token(L_ANGLE.into(), "<");
                     builder.token(L_ANGLE.into(), "<");
                 }
             }
@@ -3827,6 +3829,25 @@ mod tests {
             "1.1".parse().unwrap(),
         )));
         assert_eq!("samba (>= 1.1)", rel.to_string());
+    }
+
+    #[test]
+    fn test_relation_set_version_constraints() {
+        let version = "1.0".parse::<Version>().unwrap();
+        for (vc, expected) in [
+            (VersionConstraint::GreaterThanEqual, "samba (>= 1.0)"),
+            (VersionConstraint::LessThanEqual, "samba (<= 1.0)"),
+            (VersionConstraint::Equal, "samba (= 1.0)"),
+            (VersionConstraint::GreaterThan, "samba (>> 1.0)"),
+            (VersionConstraint::LessThan, "samba (<< 1.0)"),
+        ] {
+            let mut rel: Relation = "samba".parse().unwrap();
+            rel.set_version(Some((vc.clone(), version.clone())));
+            assert_eq!(expected, rel.to_string());
+            // The result must round-trip: re-parsing yields the same constraint.
+            let reparsed: Relation = rel.to_string().parse().unwrap();
+            assert_eq!(Some((vc, version.clone())), reparsed.version());
+        }
     }
 
     #[test]
