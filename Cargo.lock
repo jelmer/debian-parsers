@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "debian-control"
-version = "0.3.13"
+version = "0.3.14"
 dependencies = [
  "chrono",
  "deb822-fast",
