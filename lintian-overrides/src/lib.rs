@@ -1264,11 +1264,44 @@ mod tests {
             Some("X-Python-Version: >= 2.5".to_string())
         );
 
+        // A bare "source" prefix is the package type, not a package name.
         assert_eq!(lines[0].package_spec().unwrap().package_name(), None);
         assert_eq!(
             lines[0].package_spec().unwrap().package_type().unwrap(),
             "source"
         );
+    }
+
+    #[test]
+    fn test_bare_source_type_matches_source_issue() {
+        // A "source: tag info" override has no package name; it must match a
+        // source-type issue whose package is unspecified.
+        let text = "source: debian-files-list-in-source debian/files\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let line = overrides.lines().next().unwrap();
+
+        let spec = line.package_spec().unwrap();
+        assert_eq!(spec.package_name(), None);
+        assert_eq!(spec.package_type().unwrap(), "source");
+
+        assert!(line.matches(
+            Some("debian-files-list-in-source"),
+            None,
+            Some("source"),
+            Some("debian/files"),
+        ));
+    }
+
+    #[test]
+    fn test_named_source_package_spec() {
+        // "foo source: tag" names package foo of type source.
+        let text = "foo source: some-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let line = overrides.lines().next().unwrap();
+
+        let spec = line.package_spec().unwrap();
+        assert_eq!(spec.package_name().unwrap(), "foo");
+        assert_eq!(spec.package_type().unwrap(), "source");
     }
 
     #[test]
