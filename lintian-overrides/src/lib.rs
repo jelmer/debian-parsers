@@ -1038,21 +1038,28 @@ where
     }
 }
 
-/// Find all lintian-overrides files in a debian directory
-pub fn find_override_files(base_path: &std::path::Path) -> Vec<std::path::PathBuf> {
+/// Find all lintian-overrides files in a debian directory.
+///
+/// Returns the `debian/source/lintian-overrides` file (if present) followed
+/// by every `debian/*.lintian-overrides` file. An I/O error reading the
+/// `debian` directory is propagated rather than silently treated as "no
+/// override files": a caller that uses overrides to suppress a fix must not
+/// mistake an unreadable directory for an absent one.
+pub fn try_find_override_files(
+    base_path: &std::path::Path,
+) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut files = Vec::new();
 
-    // Check debian/source/lintian-overrides
     let source_overrides = base_path.join("debian/source/lintian-overrides");
     if source_overrides.exists() {
         files.push(source_overrides);
     }
 
-    // Check debian/*.lintian-overrides
     let debian_dir = base_path.join("debian");
-    if debian_dir.exists() && debian_dir.is_dir() {
-        if let Ok(entries) = std::fs::read_dir(&debian_dir) {
-            for entry in entries.flatten() {
+    match std::fs::read_dir(&debian_dir) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry?;
                 if let Some(filename) = entry.file_name().to_str() {
                     if filename.ends_with(".lintian-overrides") {
                         files.push(entry.path());
@@ -1060,24 +1067,58 @@ pub fn find_override_files(base_path: &std::path::Path) -> Vec<std::path::PathBu
                 }
             }
         }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
     }
 
-    files
+    Ok(files)
 }
 
-/// Iterate over all lintian override lines in a debian directory
-pub fn iter_overrides(base_path: &std::path::Path) -> impl Iterator<Item = OverrideLine> {
-    let files = find_override_files(base_path);
+/// Collect all lintian override lines in a debian directory.
+///
+/// An I/O error finding or reading any override file is propagated. This
+/// matters for callers that decide whether to apply a fix: silently
+/// dropping an unreadable override would treat the issue as un-suppressed
+/// and apply a change the maintainer had overridden. Parse errors within a
+/// file are tolerated, since the resilient parser still yields every
+/// well-formed line, so a malformed sibling line does not discard valid
+/// overrides.
+pub fn try_iter_overrides(base_path: &std::path::Path) -> std::io::Result<Vec<OverrideLine>> {
+    let mut lines = Vec::new();
+    for override_file in try_find_override_files(base_path)? {
+        let content = std::fs::read_to_string(&override_file)?;
+        let parsed = LintianOverrides::parse(&content);
+        lines.extend(parsed.tree().lines());
+    }
+    Ok(lines)
+}
 
-    files
+/// Find all lintian-overrides files in a debian directory.
+///
+/// Deprecated: this silently discards any I/O error reading the `debian`
+/// directory, so an unreadable directory is indistinguishable from an
+/// absent one. Use [`try_find_override_files`] instead.
+#[deprecated(
+    since = "0.1.6",
+    note = "silently swallows I/O errors; use try_find_override_files"
+)]
+pub fn find_override_files(base_path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    try_find_override_files(base_path).unwrap_or_default()
+}
+
+/// Iterate over all lintian override lines in a debian directory.
+///
+/// Deprecated: this silently drops any override file it cannot read, so a
+/// caller relying on an override to suppress a fix may apply the change
+/// anyway. Use [`try_iter_overrides`] instead.
+#[deprecated(
+    since = "0.1.6",
+    note = "silently swallows I/O errors; use try_iter_overrides"
+)]
+pub fn iter_overrides(base_path: &std::path::Path) -> impl Iterator<Item = OverrideLine> {
+    try_iter_overrides(base_path)
+        .unwrap_or_default()
         .into_iter()
-        .flat_map(|override_file| {
-            let content = std::fs::read_to_string(&override_file).ok()?;
-            let parsed = LintianOverrides::parse(&content);
-            let overrides = parsed.ok().ok()?;
-            Some(overrides.lines().collect::<Vec<_>>())
-        })
-        .flatten()
 }
 
 #[cfg(test)]
@@ -1587,5 +1628,53 @@ mod tests {
         let overrides = parsed.tree();
         let offset = rowan::TextSize::from(9u32);
         assert_eq!(overrides.token_at_offset(offset), None);
+    }
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lintian-overrides-test-{}-{}",
+            label,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_try_iter_overrides_missing_debian_dir() {
+        // No debian directory at all is not an error: there are simply no
+        // overrides.
+        let base = unique_temp_dir("missing");
+        assert_eq!(try_iter_overrides(&base).unwrap().len(), 0);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_try_iter_overrides_reads_source_overrides() {
+        let base = unique_temp_dir("reads");
+        std::fs::create_dir_all(base.join("debian/source")).unwrap();
+        std::fs::write(
+            base.join("debian/source/lintian-overrides"),
+            "foo source: some-tag\n",
+        )
+        .unwrap();
+
+        let lines = try_iter_overrides(&base).unwrap();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].tag().unwrap().text(), "some-tag");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn test_try_iter_overrides_propagates_read_dir_error() {
+        // A debian "directory" that is actually a file must surface the I/O
+        // error rather than being silently treated as having no overrides:
+        // callers rely on overrides to suppress fixes.
+        let base = unique_temp_dir("notadir");
+        std::fs::write(base.join("debian"), "not a directory").unwrap();
+
+        let err = try_iter_overrides(&base).unwrap_err();
+        assert_ne!(err.kind(), std::io::ErrorKind::NotFound);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }
