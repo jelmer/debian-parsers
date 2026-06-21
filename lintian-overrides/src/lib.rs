@@ -86,50 +86,6 @@ use SyntaxKind::*;
 /// The package type keywords valid in a lintian-overrides spec.
 const PACKAGE_TYPES: &[&str] = &["source", "binary", "udeb"];
 
-/// Whether `text` (everything before a `:`) is a valid, non-empty package spec.
-fn is_package_spec(text: &str) -> bool {
-    let mut rest = text.trim();
-    if rest.is_empty() {
-        return false;
-    }
-    let mut saw_component = false;
-
-    // Optional package name (a lone type keyword is a type, not a name).
-    if !rest.starts_with('[') {
-        let end = rest
-            .find(|c: char| c.is_whitespace() || c == '[')
-            .unwrap_or(rest.len());
-        let word = &rest[..end];
-        let after = rest[end..].trim_start();
-        if PACKAGE_TYPES.contains(&word) && after.is_empty() {
-            return true; // lone type keyword
-        }
-        saw_component = true; // package name
-        rest = after;
-    }
-
-    // Optional architecture list enclosed in brackets.
-    if rest.starts_with('[') {
-        let Some(end) = rest.find(']') else {
-            return false;
-        };
-        saw_component = true;
-        rest = rest[end + 1..].trim_start();
-    }
-
-    // Optional package type keyword.
-    if !rest.is_empty() {
-        let word = rest.split_whitespace().next().unwrap_or("");
-        if !PACKAGE_TYPES.contains(&word) {
-            return false;
-        }
-        saw_component = true;
-        rest = rest[word.len()..].trim_start();
-    }
-
-    rest.is_empty() && saw_component
-}
-
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {
         Self(kind as u16)
@@ -173,6 +129,7 @@ pub type SyntaxElement = rowan::NodeOrToken<SyntaxNode, SyntaxToken>;
 pub struct Parse<T> {
     green: GreenNode,
     errors: Vec<String>,
+    error_offsets: Vec<rowan::TextSize>,
     _phantom: std::marker::PhantomData<T>,
 }
 
@@ -183,10 +140,12 @@ unsafe impl<T> Send for Parse<T> {}
 unsafe impl<T> Sync for Parse<T> {}
 
 impl<T> Parse<T> {
-    fn new(green: GreenNode, errors: Vec<String>) -> Self {
+    fn new(green: GreenNode, errors: Vec<(String, rowan::TextSize)>) -> Self {
+        let (errors, error_offsets) = errors.into_iter().unzip();
         Parse {
             green,
             errors,
+            error_offsets,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -199,6 +158,14 @@ impl<T> Parse<T> {
     /// Get the parse errors
     pub fn errors(&self) -> &[String] {
         &self.errors
+    }
+
+    /// Get the parse errors together with their byte offsets in the source.
+    pub fn errors_with_offsets(&self) -> impl Iterator<Item = (&str, rowan::TextSize)> {
+        self.errors
+            .iter()
+            .map(|s| s.as_str())
+            .zip(self.error_offsets.iter().copied())
     }
 
     /// Convert to result, returning errors if any
@@ -302,22 +269,6 @@ impl LintianOverrides {
             .package_spec()
             .filter(|spec| spec.contains_offset(offset))?
             .package_name()
-    }
-
-    /// Return the (kind, text) of the token at the given offset, if it falls
-    /// on a meaningful token (package name, arch, type, or tag).
-    pub fn token_at_offset(&self, offset: rowan::TextSize) -> Option<(SyntaxKind, String)> {
-        let line = self
-            .lines()
-            .find(|line| line.syntax().text_range().contains(offset))?;
-        line.syntax()
-            .descendants_with_tokens()
-            .filter_map(|it| it.into_token())
-            .find(|tok| {
-                matches!(tok.kind(), PACKAGE_NAME | ARCH | PACKAGE_TYPE | TAG)
-                    && tok.text_range().contains(offset)
-            })
-            .map(|tok| (tok.kind(), tok.text().to_string()))
     }
 
     /// Convert back to text
@@ -602,10 +553,15 @@ impl PackageSpec {
     }
 }
 
-/// Parse a lintian-overrides file
-fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<String>) {
+/// Parse a lintian-overrides file.
+///
+/// Parsing is resilient: a syntax tree is always produced, and malformed lines
+/// are recorded as errors (with their byte offset) and wrapped in an ERROR
+/// node so callers can do partial processing of the rest of the file.
+fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<(String, rowan::TextSize)>) {
     let mut builder = GreenNodeBuilder::new();
     let mut errors = Vec::new();
+    let mut offset = rowan::TextSize::from(0);
 
     builder.start_node(ROOT.into());
 
@@ -617,9 +573,11 @@ fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<String>) {
             Some(stripped) => (stripped, true),
             None => (raw_line, false),
         };
-        parse_line(&mut builder, line, &mut errors);
+        parse_line(&mut builder, line, offset, &mut errors);
+        offset += rowan::TextSize::of(line);
         if has_newline {
             builder.token(NEWLINE.into(), "\n");
+            offset += rowan::TextSize::from(1);
         }
     }
 
@@ -627,187 +585,241 @@ fn parse_lintian_overrides(text: &str) -> (GreenNode, Vec<String>) {
     (builder.finish(), errors)
 }
 
-fn parse_line(builder: &mut GreenNodeBuilder, line: &str, _errors: &mut Vec<String>) {
+/// Build the OVERRIDE_LINE node for a single line.
+///
+/// The line is lexed in one forward pass and the resulting tokens are grouped:
+/// leading whitespace and everything from the tag onwards sit directly under
+/// the line, while the package spec (up to and including its colon) is wrapped
+/// in a PACKAGE_SPEC node. A non-empty, non-comment line that carries no tag,
+/// or one with an unterminated arch bracket, is wrapped in an ERROR node and
+/// recorded in `errors`.
+fn parse_line(
+    builder: &mut GreenNodeBuilder,
+    line: &str,
+    offset: rowan::TextSize,
+    errors: &mut Vec<(String, rowan::TextSize)>,
+) {
     builder.start_node(OVERRIDE_LINE.into());
 
-    // Handle leading whitespace
-    let trimmed_start = line.trim_start();
-    let leading_ws = &line[..line.len() - trimmed_start.len()];
-    if !leading_ws.is_empty() {
-        builder.token(WHITESPACE.into(), leading_ws);
+    let lexed = lex_line(line);
+    let has_content = lexed
+        .tokens
+        .iter()
+        .any(|(kind, _)| !matches!(kind, WHITESPACE | COMMENT));
+    let has_tag = lexed.tokens.iter().any(|(kind, _)| *kind == TAG);
+
+    // A line with content but no tag, or one with a lexing error, is malformed:
+    // record it and wrap its tokens in an ERROR node so the region is visible.
+    let error = lexed
+        .error
+        .or_else(|| (has_content && !has_tag).then(|| "missing lintian tag".to_string()));
+    let wrap_error = error.is_some();
+    if let Some(msg) = error {
+        errors.push((msg, offset));
     }
 
-    // Check for comment
-    if trimmed_start.starts_with('#') {
-        builder.token(COMMENT.into(), trimmed_start);
-        builder.finish_node();
-        return;
+    // Leading whitespace stays directly under the override line.
+    let tokens = &lexed.tokens;
+    let mut start = 0;
+    if let Some((WHITESPACE, ws)) = tokens.first() {
+        builder.token(WHITESPACE.into(), ws);
+        start = 1;
     }
 
-    // Empty line
-    if trimmed_start.is_empty() {
-        builder.finish_node();
-        return;
+    if wrap_error {
+        builder.start_node(ERROR.into());
     }
 
-    // Parse the override line
-    let mut current_start = 0;
-
-    // First, check if we have a package spec by looking for a colon
-    // The package spec format is "package-name:", "package-name type:" or "package-name [ archlist ] type"
-    // We need to distinguish this from info that may contain colons (e.g., "line 51:")
-    // A package spec will have:
-    // 1. A colon followed by whitespace or end-of-line
-    // 2. The part before the colon should be a reasonable package spec (1-2 words)
-    let mut has_package_spec = false;
-    let mut colon_pos = 0;
-
-    if let Some(pos) = trimmed_start.find(':') {
-        // Check if the colon is followed by whitespace or is at the end
-        let after_colon = &trimmed_start[pos + 1..];
-        if after_colon.is_empty() || after_colon.starts_with(char::is_whitespace) {
-            // Check if the part before the colon looks like a package spec
-            let before_colon = &trimmed_start[..pos];
-            // Check whether the text before a colon is a valid package spec.
-            if is_package_spec(before_colon) {
-                // This looks like a valid package spec
-                has_package_spec = true;
-                colon_pos = pos;
+    let body = &tokens[start..];
+    match body.iter().position(|(kind, _)| *kind == COLON) {
+        Some(colon) => {
+            builder.start_node(PACKAGE_SPEC.into());
+            for (kind, text) in &body[..=colon] {
+                builder.token((*kind).into(), text);
+            }
+            builder.finish_node();
+            for (kind, text) in &body[colon + 1..] {
+                builder.token((*kind).into(), text);
+            }
+        }
+        None => {
+            for (kind, text) in body {
+                builder.token((*kind).into(), text);
             }
         }
     }
 
-    if has_package_spec {
-        // Found package spec - parse it into package name, optional arch list, and optionally package type
-        builder.start_node(PACKAGE_SPEC.into());
-
-        parse_package_spec_tokens(builder, &trimmed_start[..colon_pos]);
-
-        builder.token(COLON.into(), ":");
+    if wrap_error {
         builder.finish_node();
-
-        current_start = colon_pos + 1;
-
-        // Skip any whitespace after colon
-        let after_colon = &trimmed_start[current_start..];
-        let trimmed_after = after_colon.trim_start();
-        let ws_len = after_colon.len() - trimmed_after.len();
-        if ws_len > 0 {
-            builder.token(WHITESPACE.into(), &after_colon[..ws_len]);
-            current_start += ws_len;
-        }
-    }
-
-    // The remainder is: [whitespace] tag [whitespace info-spanning-the-rest].
-    // Info may itself contain whitespace, so we don't tokenise inside it —
-    // it's a single INFO token from its first byte to the end of `rest`.
-    let rest = &trimmed_start[current_start..];
-    let ws_end = rest.len() - rest.trim_start().len();
-    if ws_end > 0 {
-        builder.token(WHITESPACE.into(), &rest[..ws_end]);
-    }
-    let after_ws = &rest[ws_end..];
-    if after_ws.is_empty() {
-        builder.finish_node();
-        return;
-    }
-    let tag_end = after_ws.find(char::is_whitespace).unwrap_or(after_ws.len());
-    builder.token(TAG.into(), &after_ws[..tag_end]);
-    let after_tag = &after_ws[tag_end..];
-    if after_tag.is_empty() {
-        builder.finish_node();
-        return;
-    }
-    let info_start = after_tag.len() - after_tag.trim_start().len();
-    if info_start > 0 {
-        builder.token(WHITESPACE.into(), &after_tag[..info_start]);
-    }
-    let info = &after_tag[info_start..];
-    if !info.is_empty() {
-        builder.token(INFO.into(), info);
     }
 
     builder.finish_node();
 }
 
-/// Emit CST tokens for the content of a package spec (everything before the colon).
-fn parse_package_spec_tokens(builder: &mut GreenNodeBuilder, spec: &str) {
-    let mut rest = spec;
+/// The result of lexing a single line: its tokens and an optional error
+/// message for a malformed line (e.g. an unterminated arch bracket).
+struct LexedLine<'a> {
+    tokens: Vec<(SyntaxKind, &'a str)>,
+    error: Option<String>,
+}
 
-    // Optional package name - any word before whitespace or '['.
-    let trimmed = rest.trim_start();
-    let leading_ws = &rest[..rest.len() - trimmed.len()];
+/// Lex a single line into a flat token stream in one forward pass.
+///
+/// The line grammar is `[ws] package-spec? [ws] tag [ws info]?`, where
+/// `package-spec = [name] [ws] ["[" archlist "]"] [ws] [type] ":"`.
+///
+/// The colon is ambiguous: it only opens a package spec when the text up to it
+/// is itself a valid spec (otherwise the colon belongs to the info, as in
+/// `line 51:`). We resolve this by lexing the prefix speculatively; if the scan
+/// reaches a terminating colon those tokens are kept, otherwise they are
+/// dropped and the whole line is read as a bare tag plus info.
+fn lex_line(line: &str) -> LexedLine<'_> {
+    let mut tokens = Vec::new();
+
+    let trimmed = line.trim_start();
+    let leading_ws = &line[..line.len() - trimmed.len()];
     if !leading_ws.is_empty() {
-        builder.token(WHITESPACE.into(), leading_ws);
+        tokens.push((WHITESPACE, leading_ws));
     }
-    rest = trimmed;
 
-    if !rest.is_empty() && !rest.starts_with('[') {
+    if trimmed.is_empty() {
+        return LexedLine {
+            tokens,
+            error: None,
+        };
+    }
+    if trimmed.starts_with('#') {
+        tokens.push((COMMENT, trimmed));
+        return LexedLine {
+            tokens,
+            error: None,
+        };
+    }
+
+    // Try a leading package spec; fall back to treating the line as tag + info.
+    let mut error = None;
+    let rest = match lex_package_spec(trimmed) {
+        SpecScan::Spec(spec, after) => {
+            tokens.extend(spec);
+            after
+        }
+        SpecScan::Unterminated => {
+            error = Some("unterminated architecture list".to_string());
+            trimmed
+        }
+        SpecScan::None => trimmed,
+    };
+
+    // The remainder is [ws] tag [ws info]. Info may contain whitespace and
+    // colons, so it is a single token spanning to the end of the line.
+    let rest = push_ws(&mut tokens, rest);
+    if !rest.is_empty() {
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        tokens.push((TAG, &rest[..end]));
+        let info = push_ws(&mut tokens, &rest[end..]);
+        if !info.is_empty() {
+            tokens.push((INFO, info));
+        }
+    }
+
+    LexedLine { tokens, error }
+}
+
+/// The outcome of scanning a line for a leading package spec.
+enum SpecScan<'a> {
+    /// A valid spec: its tokens and the remainder after the colon.
+    Spec(Vec<(SyntaxKind, &'a str)>, &'a str),
+    /// A spec-like prefix with an opening `[` but no closing `]`.
+    Unterminated,
+    /// No package spec; the line is a bare tag plus info.
+    None,
+}
+
+/// Lex a leading package spec terminated by `:`.
+fn lex_package_spec(line: &str) -> SpecScan<'_> {
+    let mut tokens = Vec::new();
+    let mut rest = line;
+
+    // Optional package name. A lone type keyword denotes the type, not a name,
+    // so a bare type keyword directly before the colon is emitted as the type.
+    if !rest.starts_with('[') {
         let end = rest
-            .find(|c: char| c.is_whitespace() || c == '[')
+            .find(|c: char| c.is_whitespace() || c == '[' || c == ':')
             .unwrap_or(rest.len());
         let word = &rest[..end];
-        // A lone type keyword fills the <type> slot, not <package>
-        if PACKAGE_TYPES.contains(&word) && rest[end..].trim_start().is_empty() {
-            builder.token(PACKAGE_TYPE.into(), word);
-            return;
+        let after = rest[end..].trim_start();
+        if word.is_empty() {
+            return SpecScan::None;
         }
-        builder.token(PACKAGE_NAME.into(), word);
-        rest = &rest[end..];
+        if PACKAGE_TYPES.contains(&word) && after.starts_with(':') {
+            tokens.push((PACKAGE_TYPE, word));
+            return finish_spec(tokens, after);
+        }
+        tokens.push((PACKAGE_NAME, word));
+        rest = push_ws(&mut tokens, &rest[end..]);
     }
 
-    // Whitespace between package name and '[' or type.
-    let trimmed = rest.trim_start();
-    let ws = &rest[..rest.len() - trimmed.len()];
-    if !ws.is_empty() {
-        builder.token(WHITESPACE.into(), ws);
-    }
-    rest = trimmed;
-
-    // Optional architecture list
+    // Optional architecture list enclosed in brackets. An opening bracket that
+    // is part of a spec-like line but is never closed is a malformed spec, not
+    // info that happens to contain a `[`.
     if rest.starts_with('[') {
-        if let Some(end) = rest.find(']') {
-            builder.token(L_BRACKET.into(), "[");
-
-            // Emit each arch token inside the brackets, preserving whitespace.
-            let mut arch_rest = &rest[1..end];
-            loop {
-                let trimmed_arch = arch_rest.trim_start();
-                let ws = &arch_rest[..arch_rest.len() - trimmed_arch.len()];
-                if !ws.is_empty() {
-                    builder.token(WHITESPACE.into(), ws);
-                }
-                arch_rest = trimmed_arch;
-                if arch_rest.is_empty() {
-                    break;
-                }
-                let arch_end = arch_rest
-                    .find(char::is_whitespace)
-                    .unwrap_or(arch_rest.len());
-                builder.token(ARCH.into(), &arch_rest[..arch_end]);
-                arch_rest = &arch_rest[arch_end..];
+        let Some(end) = rest.find(']') else {
+            return SpecScan::Unterminated;
+        };
+        tokens.push((L_BRACKET, "["));
+        let mut arch = &rest[1..end];
+        loop {
+            arch = push_ws(&mut tokens, arch);
+            if arch.is_empty() {
+                break;
             }
-
-            builder.token(R_BRACKET.into(), "]");
-            rest = &rest[end + 1..];
+            let word_end = arch.find(char::is_whitespace).unwrap_or(arch.len());
+            tokens.push((ARCH, &arch[..word_end]));
+            arch = &arch[word_end..];
         }
+        tokens.push((R_BRACKET, "]"));
+        rest = push_ws(&mut tokens, &rest[end + 1..]);
     }
 
-    // Whitespace between ']' and type.
+    // Optional trailing package type keyword.
+    if !rest.starts_with(':') {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == ':')
+            .unwrap_or(rest.len());
+        let word = &rest[..end];
+        if !PACKAGE_TYPES.contains(&word) {
+            return SpecScan::None;
+        }
+        tokens.push((PACKAGE_TYPE, word));
+        rest = push_ws(&mut tokens, &rest[end..]);
+    }
+
+    finish_spec(tokens, rest)
+}
+
+/// Commit the spec when `rest` starts with the terminating colon. A spec colon
+/// is followed by whitespace or end of line; a colon glued to more text (e.g.
+/// `foo:bar`) is info, not a spec terminator.
+fn finish_spec<'a>(mut tokens: Vec<(SyntaxKind, &'a str)>, rest: &'a str) -> SpecScan<'a> {
+    let Some(after) = rest.strip_prefix(':') else {
+        return SpecScan::None;
+    };
+    if !after.is_empty() && !after.starts_with(char::is_whitespace) {
+        return SpecScan::None;
+    }
+    tokens.push((COLON, ":"));
+    SpecScan::Spec(tokens, after)
+}
+
+/// Split leading whitespace off `rest`, emit it as a WHITESPACE token, and
+/// return the remainder.
+fn push_ws<'a>(tokens: &mut Vec<(SyntaxKind, &'a str)>, rest: &'a str) -> &'a str {
     let trimmed = rest.trim_start();
     let ws = &rest[..rest.len() - trimmed.len()];
     if !ws.is_empty() {
-        builder.token(WHITESPACE.into(), ws);
+        tokens.push((WHITESPACE, ws));
     }
-    rest = trimmed;
-
-    // Optional package type: source, binary, or udeb.
-    if !rest.is_empty() {
-        let word = rest.split_whitespace().next().unwrap_or("");
-        if !word.is_empty() {
-            builder.token(PACKAGE_TYPE.into(), word);
-        }
-    }
+    trimmed
 }
 
 /// Builder for creating/modifying lintian-overrides files
@@ -1305,11 +1317,44 @@ mod tests {
             Some("X-Python-Version: >= 2.5".to_string())
         );
 
+        // A bare "source" prefix is the package type, not a package name.
         assert_eq!(lines[0].package_spec().unwrap().package_name(), None);
         assert_eq!(
             lines[0].package_spec().unwrap().package_type().unwrap(),
             "source"
         );
+    }
+
+    #[test]
+    fn test_bare_source_type_matches_source_issue() {
+        // A "source: tag info" override has no package name; it must match a
+        // source-type issue whose package is unspecified.
+        let text = "source: debian-files-list-in-source debian/files\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let line = overrides.lines().next().unwrap();
+
+        let spec = line.package_spec().unwrap();
+        assert_eq!(spec.package_name(), None);
+        assert_eq!(spec.package_type().unwrap(), "source");
+
+        assert!(line.matches(
+            Some("debian-files-list-in-source"),
+            None,
+            Some("source"),
+            Some("debian/files"),
+        ));
+    }
+
+    #[test]
+    fn test_named_source_package_spec() {
+        // "foo source: tag" names package foo of type source.
+        let text = "foo source: some-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let line = overrides.lines().next().unwrap();
+
+        let spec = line.package_spec().unwrap();
+        assert_eq!(spec.package_name().unwrap(), "foo");
+        assert_eq!(spec.package_type().unwrap(), "source");
     }
 
     #[test]
@@ -1578,56 +1623,57 @@ mod tests {
     }
 
     #[test]
-    fn test_token_at_offset_on_tag() {
-        let text = "libcurl4: hardening-no-pie\n";
+    fn test_spec_without_tag_is_error() {
+        let text = "libcurl4:\n";
         let parsed = LintianOverrides::parse(text);
-        let overrides = parsed.tree();
-        let offset = rowan::TextSize::from(14u32);
-        let (kind, text) = overrides.token_at_offset(offset).unwrap();
-        assert_eq!(kind, SyntaxKind::TAG);
-        assert_eq!(text, "hardening-no-pie");
+        assert_eq!(
+            parsed.errors_with_offsets().collect::<Vec<_>>(),
+            vec![("missing lintian tag", rowan::TextSize::from(0))]
+        );
+        // The tree is still produced and round-trips exactly.
+        assert_eq!(parsed.tree().text(), text);
     }
 
     #[test]
-    fn test_token_at_offset_on_package() {
-        let text = "libcurl4: hardening-no-pie\n";
+    fn test_unterminated_arch_list_is_error() {
+        let text = "foo [amd64: tag\n";
         let parsed = LintianOverrides::parse(text);
-        let overrides = parsed.tree();
-        let offset = rowan::TextSize::from(3u32);
-        let (kind, text) = overrides.token_at_offset(offset).unwrap();
-        assert_eq!(kind, SyntaxKind::PACKAGE_NAME);
-        assert_eq!(text, "libcurl4");
+        assert_eq!(
+            parsed.errors_with_offsets().collect::<Vec<_>>(),
+            vec![("unterminated architecture list", rowan::TextSize::from(0))]
+        );
+        assert_eq!(parsed.tree().text(), text);
     }
 
     #[test]
-    fn test_token_at_offset_on_type() {
-        let text = "libcurl4 binary: hardening-no-pie\n";
+    fn test_partial_parse_reports_offset_of_bad_line() {
+        // The first and third lines are well-formed; only the second is an
+        // error, reported at its byte offset, and the tree round-trips whole.
+        let text = "good: tag\nlibcurl4:\nalso-good: tag2\n";
         let parsed = LintianOverrides::parse(text);
-        let overrides = parsed.tree();
-        let offset = rowan::TextSize::from(10u32);
-        let (kind, text) = overrides.token_at_offset(offset).unwrap();
-        assert_eq!(kind, SyntaxKind::PACKAGE_TYPE);
-        assert_eq!(text, "binary");
+        assert_eq!(
+            parsed.errors_with_offsets().collect::<Vec<_>>(),
+            vec![("missing lintian tag", rowan::TextSize::from(10))]
+        );
+        assert_eq!(parsed.tree().text(), text);
+
+        let lines: Vec<_> = parsed.tree().lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].package().unwrap(), "good");
+        assert_eq!(lines[0].tag().unwrap().text(), "tag");
+        assert_eq!(lines[2].package().unwrap(), "also-good");
+        assert_eq!(lines[2].tag().unwrap().text(), "tag2");
     }
 
     #[test]
-    fn test_token_at_offset_on_arch() {
-        let text = "libcurl4 [amd64]: hardening-no-pie\n";
+    fn test_error_line_wrapped_in_error_node() {
+        let text = "libcurl4:\n";
         let parsed = LintianOverrides::parse(text);
-        let overrides = parsed.tree();
-        let offset = rowan::TextSize::from(11u32);
-        let (kind, text) = overrides.token_at_offset(offset).unwrap();
-        assert_eq!(kind, SyntaxKind::ARCH);
-        assert_eq!(text, "amd64");
-    }
-
-    #[test]
-    fn test_token_at_offset_on_whitespace_returns_none() {
-        let text = "libcurl4: hardening-no-pie\n";
-        let parsed = LintianOverrides::parse(text);
-        let overrides = parsed.tree();
-        let offset = rowan::TextSize::from(9u32);
-        assert_eq!(overrides.token_at_offset(offset), None);
+        let has_error_node = parsed
+            .syntax()
+            .descendants()
+            .any(|n| n.kind() == SyntaxKind::ERROR);
+        assert!(has_error_node);
     }
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
