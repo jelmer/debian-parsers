@@ -25,6 +25,45 @@ impl GlobPattern {
     }
 }
 
+/// Decode a DEP-5 file pattern that names a single literal path.
+///
+/// A pattern is literal when it has no unescaped `*` or `?` wildcard. Escapes
+/// (`\*`, `\?`, `\\`) are resolved to the characters they stand for, so the
+/// returned string is the actual filename the pattern designates. Patterns that
+/// contain a wildcard (and therefore match many paths) return `None`.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(debian_copyright::glob::literal_path("src/main.rs").as_deref(), Some("src/main.rs"));
+/// assert_eq!(debian_copyright::glob::literal_path(r"\*.txt").as_deref(), Some("*.txt"));
+/// assert_eq!(debian_copyright::glob::literal_path("src/*.rs"), None);
+/// ```
+///
+/// A malformed trailing or invalid escape returns `None` rather than panicking,
+/// since callers decode arbitrary file contents.
+pub fn literal_path(pattern: &str) -> Option<String> {
+    let mut out = String::with_capacity(pattern.len());
+    let mut it = pattern.chars();
+    while let Some(c) = it.next() {
+        match c {
+            '*' | '?' => return None,
+            '\\' => match it.next() {
+                Some(esc @ ('*' | '?' | '\\')) => out.push(esc),
+                _ => return None,
+            },
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
+/// Whether a DEP-5 file pattern contains a wildcard, i.e. can match more than
+/// one path. The inverse of [`literal_path`] returning `Some`.
+pub fn is_glob(pattern: &str) -> bool {
+    literal_path(pattern).is_none()
+}
+
 /// Convert a glob pattern to a regular expression.
 #[deprecated(since = "0.1.46", note = "use GlobPattern instead")]
 pub fn glob_to_regex(glob: &str) -> regex::Regex {
@@ -193,5 +232,43 @@ mod tests {
         let pat = super::GlobPattern::new("file(1).txt");
         assert!(pat.is_match("file(1).txt"));
         assert!(!pat.is_match("file1.txt"));
+    }
+
+    #[test]
+    fn test_literal_path_plain() {
+        assert_eq!(
+            super::literal_path("src/main.rs").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(super::literal_path("LICENSE").as_deref(), Some("LICENSE"));
+    }
+
+    #[test]
+    fn test_literal_path_unescapes() {
+        assert_eq!(super::literal_path(r"\*.txt").as_deref(), Some("*.txt"));
+        assert_eq!(super::literal_path(r"\?.txt").as_deref(), Some("?.txt"));
+        assert_eq!(super::literal_path(r"a\\b").as_deref(), Some(r"a\b"));
+    }
+
+    #[test]
+    fn test_literal_path_rejects_globs() {
+        assert_eq!(super::literal_path("src/*.rs"), None);
+        assert_eq!(super::literal_path("file?.txt"), None);
+    }
+
+    #[test]
+    fn test_literal_path_rejects_invalid_escape() {
+        // A trailing or invalid escape is not a valid literal; return None
+        // rather than panicking on arbitrary input.
+        assert_eq!(super::literal_path(r"foo\"), None);
+        assert_eq!(super::literal_path(r"foo\x"), None);
+    }
+
+    #[test]
+    fn test_is_glob() {
+        assert!(super::is_glob("src/*.rs"));
+        assert!(super::is_glob("file?.txt"));
+        assert!(!super::is_glob("src/main.rs"));
+        assert!(!super::is_glob(r"\*.txt"));
     }
 }
