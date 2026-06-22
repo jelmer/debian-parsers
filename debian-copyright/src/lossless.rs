@@ -717,6 +717,26 @@ impl Header {
     }
 }
 
+/// Split `text` into whitespace-separated tokens, returning each token with its
+/// byte range within `text`.
+fn whitespace_spans(text: &str) -> Vec<(&str, usize, usize)> {
+    let mut out = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        if c.is_whitespace() {
+            if let Some(s) = start.take() {
+                out.push((&text[s..i], s, i));
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        out.push((&text[s..], s, text.len()));
+    }
+    out
+}
+
 /// A files paragraph
 pub struct FilesParagraph(Paragraph);
 
@@ -753,6 +773,39 @@ impl FilesParagraph {
             .split_whitespace()
             .map(|v| v.to_string())
             .collect::<Vec<_>>()
+    }
+
+    /// File patterns in the paragraph, each paired with its byte range in the
+    /// source document.
+    ///
+    /// Unlike [`files`](Self::files), which only returns the pattern strings,
+    /// this locates each whitespace-separated pattern within the `Files` field
+    /// value -- including across continuation lines -- so callers (an indexer,
+    /// an editor) can map a pattern back to its position. Patterns are returned
+    /// as written, before any escape decoding; use [`crate::glob::literal_path`]
+    /// to resolve one to the path it names.
+    pub fn file_spans(&self) -> Vec<(String, TextRange)> {
+        use deb822_lossless::TextSize;
+        let Some(entry) = self.0.get_entry("Files") else {
+            return Vec::new();
+        };
+        let mut spans = Vec::new();
+        // `value()` joins the VALUE tokens with `\n` in the same order as
+        // `value_line_ranges()`, so the two zip line-for-line. Each pattern is
+        // located within its own line and offset by that line's start.
+        for (line, range) in entry.value().split('\n').zip(entry.value_line_ranges()) {
+            let base: usize = range.start().into();
+            for (token, start, end) in whitespace_spans(line) {
+                spans.push((
+                    token.to_string(),
+                    TextRange::new(
+                        TextSize::from((base + start) as u32),
+                        TextSize::from((base + end) as u32),
+                    ),
+                ));
+            }
+        }
+        spans
     }
 
     /// Set the file patterns in the paragraph
@@ -1160,6 +1213,39 @@ the Free Software Foundation, either version 3 of the License, or
 
         let gpl = copyright.find_license_for_file(std::path::Path::new("debian/foo.c"));
         assert_eq!(gpl.unwrap().name().unwrap(), "GPL-3+");
+    }
+
+    #[test]
+    fn test_file_spans_single_line() {
+        let s = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nFiles: src/main.c debian/copyright vendor/*\nCopyright: 2024 Alice\nLicense: MIT\n";
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let fp = copyright.iter_files().next().unwrap();
+        let spans = fp.file_spans();
+        let patterns: Vec<&str> = spans.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(patterns, vec!["src/main.c", "debian/copyright", "vendor/*"]);
+        // Each range slices back to its pattern in the source.
+        for (pat, range) in &spans {
+            let start: usize = range.start().into();
+            let end: usize = range.end().into();
+            assert_eq!(&s[start..end], pat);
+        }
+    }
+
+    #[test]
+    fn test_file_spans_multi_line() {
+        // A Files value continued across lines: each pattern keeps its own
+        // source range.
+        let s = "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n\nFiles: src/main.c\n debian/copyright\nCopyright: 2024 Alice\nLicense: MIT\n";
+        let copyright = s.parse::<super::Copyright>().expect("failed to parse");
+        let fp = copyright.iter_files().next().unwrap();
+        let spans = fp.file_spans();
+        let patterns: Vec<&str> = spans.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(patterns, vec!["src/main.c", "debian/copyright"]);
+        for (pat, range) in &spans {
+            let start: usize = range.start().into();
+            let end: usize = range.end().into();
+            assert_eq!(&s[start..end], pat);
+        }
     }
 
     #[test]
