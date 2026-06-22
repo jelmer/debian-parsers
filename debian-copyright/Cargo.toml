@@ -13,12 +13,13 @@ categories = ["parser-implementations"]
 [dependencies]
 debversion = ">=0.4.7, <0.6"
 regex = ">=1.10, <2"
-deb822-lossless = { version = ">=0.5.16, <0.6", path = "../deb822-lossless", optional = true }
+deb822-edit = { version = ">=0.5.16, <0.6", path = "../deb822-edit", optional = true }
 deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = ["derive"] }
 
 [features]
-default = ["lossless"]
-lossless = ["dep:deb822-lossless"]
+default = ["edit"]
+edit = ["dep:deb822-edit"]
+lossless = ["edit"]  # Deprecated: use 'edit' feature instead
 
 [badges]
 maintenance = { status = "actively-maintained" }

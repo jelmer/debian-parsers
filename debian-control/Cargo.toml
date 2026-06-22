@@ -14,7 +14,7 @@ categories = ["parser-implementations"]
 rowan = { version = "0.16", optional = true }
 debversion = ">=0.4.7, <0.6"
 regex = ">=1, <2"
-deb822-lossless = { version = ">=0.5.16, <0.6", path = "../deb822-lossless", optional = true }
+deb822-edit = { version = ">=0.5.16, <0.6", path = "../deb822-edit", optional = true }
 deb822-fast = { path = "../deb822-fast", features = ["derive"], version = ">=0.2.0, <0.3" }
 url = ">=2, <3"
 pyo3 = { workspace = true, optional = true }
@@ -22,19 +22,20 @@ chrono = { version = ">=0.4, <0.5", optional = true }
 serde = { version = "1", optional = true }
 
 [features]
-default = ["chrono", "lossless"]
-python-debian = ["dep:pyo3", "deb822-lossless/python-debian"]
+default = ["chrono", "edit"]
+python-debian = ["dep:pyo3", "deb822-edit/python-debian"]
 chrono = ["dep:chrono"]
 serde = ["dep:serde"]
-lossless = ["dep:deb822-lossless", "dep:rowan"]
+edit = ["dep:deb822-edit", "dep:rowan"]
+lossless = ["edit"]  # Deprecated: use 'edit' feature instead
 
 [[example]]
 name = "create-file"
-required-features = ["lossless"]
+required-features = ["edit"]
 
 [[example]]
 name = "incremental_parse"
-required-features = ["lossless"]
+required-features = ["edit"]
 
 [dev-dependencies]
 serde_json = "1.0.148"

@@ -1,13 +1,13 @@
 //! APT package manager files
+use crate::edit::relations::Relations;
 use crate::fields::{
     Md5Checksum, MultiArch, Priority, Sha1Checksum, Sha256Checksum, Sha512Checksum,
 };
-use crate::lossless::relations::Relations;
 use rowan::ast::AstNode;
 
 /// A source package in the APT package manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Source(deb822_lossless::Paragraph);
+pub struct Source(deb822_edit::Paragraph);
 
 // SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
 // Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
@@ -57,31 +57,31 @@ impl<'py> pyo3::FromPyObject<'_, 'py> for Source {
     }
 }
 
-impl From<deb822_lossless::Paragraph> for Source {
-    fn from(paragraph: deb822_lossless::Paragraph) -> Self {
+impl From<deb822_edit::Paragraph> for Source {
+    fn from(paragraph: deb822_edit::Paragraph) -> Self {
         Self(paragraph)
     }
 }
 
 impl Default for Source {
     fn default() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_edit::Paragraph::new())
     }
 }
 
 impl Source {
     /// Create a new source package
     pub fn new() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_edit::Paragraph::new())
     }
 
     /// Parse source package text, returning a Parse result
     ///
     /// Note: This expects a single paragraph, not a full deb822 document
-    pub fn parse(text: &str) -> deb822_lossless::Parse<Source> {
+    pub fn parse(text: &str) -> deb822_edit::Parse<Source> {
         // We need to transform Parse<Deb822> to Parse<Source>
         // Since Source wraps a single Paragraph, we need custom logic
-        let deb822_parse = deb822_lossless::Deb822::parse(text);
+        let deb822_parse = deb822_edit::Deb822::parse(text);
 
         // For now, we'll use the same green node but the cast will extract the first paragraph
         let green = deb822_parse.green().clone();
@@ -98,7 +98,7 @@ impl Source {
             }
         }
 
-        deb822_lossless::Parse::new(green, errors)
+        deb822_edit::Parse::new(green, errors)
     }
 
     /// Get the source name
@@ -505,7 +505,7 @@ impl Source {
 }
 
 impl std::str::FromStr for Source {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Source::parse(s).to_result()
@@ -513,18 +513,18 @@ impl std::str::FromStr for Source {
 }
 
 impl AstNode for Source {
-    type Language = deb822_lossless::Lang;
+    type Language = deb822_edit::Lang;
 
     fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
         // Source can be cast from either a Paragraph or a Deb822 (taking first paragraph)
-        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+        deb822_edit::Paragraph::can_cast(kind) || deb822_edit::Deb822::can_cast(kind)
     }
 
     fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
         // Try to cast as Paragraph first
-        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+        if let Some(para) = deb822_edit::Paragraph::cast(syntax.clone()) {
             Some(Source(para))
-        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+        } else if let Some(deb822) = deb822_edit::Deb822::cast(syntax) {
             // If it's a Deb822, take the first paragraph
             deb822.paragraphs().next().map(Source)
         } else {
@@ -545,7 +545,7 @@ impl std::fmt::Display for Source {
 
 /// A package in the APT package manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Package(deb822_lossless::Paragraph);
+pub struct Package(deb822_edit::Paragraph);
 
 // SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
 // Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
@@ -597,15 +597,15 @@ impl<'py> pyo3::FromPyObject<'_, 'py> for Package {
 
 impl Package {
     /// Create a new package.
-    pub fn new(paragraph: deb822_lossless::Paragraph) -> Self {
+    pub fn new(paragraph: deb822_edit::Paragraph) -> Self {
         Self(paragraph)
     }
 
     /// Parse package text, returning a Parse result
     ///
     /// Note: This expects a single paragraph, not a full deb822 document
-    pub fn parse(text: &str) -> deb822_lossless::Parse<Package> {
-        let deb822_parse = deb822_lossless::Deb822::parse(text);
+    pub fn parse(text: &str) -> deb822_edit::Parse<Package> {
+        let deb822_parse = deb822_edit::Deb822::parse(text);
         let green = deb822_parse.green().clone();
         let mut errors = deb822_parse.errors().to_vec();
 
@@ -620,7 +620,7 @@ impl Package {
             }
         }
 
-        deb822_lossless::Parse::new(green, errors)
+        deb822_edit::Parse::new(green, errors)
     }
 
     /// Get the name of the package.
@@ -926,7 +926,7 @@ impl Package {
 
 impl Default for Package {
     fn default() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_edit::Paragraph::new())
     }
 }
 
@@ -937,7 +937,7 @@ impl std::fmt::Display for Package {
 }
 
 impl std::str::FromStr for Package {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Package::parse(s).to_result()
@@ -945,16 +945,16 @@ impl std::str::FromStr for Package {
 }
 
 impl AstNode for Package {
-    type Language = deb822_lossless::Lang;
+    type Language = deb822_edit::Lang;
 
     fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
-        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+        deb822_edit::Paragraph::can_cast(kind) || deb822_edit::Deb822::can_cast(kind)
     }
 
     fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
-        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+        if let Some(para) = deb822_edit::Paragraph::cast(syntax.clone()) {
             Some(Package(para))
-        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+        } else if let Some(deb822) = deb822_edit::Deb822::cast(syntax) {
             deb822.paragraphs().next().map(Package)
         } else {
             None
@@ -968,7 +968,7 @@ impl AstNode for Package {
 
 /// A release in the APT package manager.
 #[derive(Clone)]
-pub struct Release(deb822_lossless::Paragraph);
+pub struct Release(deb822_edit::Paragraph);
 
 // SAFETY: rowan's SyntaxNode uses NonNull<NodeData>, but the underlying data is
 // Arc-managed and there are no aliased mutable references, so Send+Sync is safe.
@@ -1020,15 +1020,15 @@ impl<'py> pyo3::FromPyObject<'_, 'py> for Release {
 
 impl Release {
     /// Create a new release
-    pub fn new(paragraph: deb822_lossless::Paragraph) -> Self {
+    pub fn new(paragraph: deb822_edit::Paragraph) -> Self {
         Self(paragraph)
     }
 
     /// Parse release text, returning a Parse result
     ///
     /// Note: This expects a single paragraph, not a full deb822 document
-    pub fn parse(text: &str) -> deb822_lossless::Parse<Release> {
-        let deb822_parse = deb822_lossless::Deb822::parse(text);
+    pub fn parse(text: &str) -> deb822_edit::Parse<Release> {
+        let deb822_parse = deb822_edit::Deb822::parse(text);
         let green = deb822_parse.green().clone();
         let mut errors = deb822_parse.errors().to_vec();
 
@@ -1043,7 +1043,7 @@ impl Release {
             }
         }
 
-        deb822_lossless::Parse::new(green, errors)
+        deb822_edit::Parse::new(green, errors)
     }
 
     /// Get the origin of the release
@@ -1338,7 +1338,7 @@ impl Release {
 
 impl Default for Release {
     fn default() -> Self {
-        Self(deb822_lossless::Paragraph::new())
+        Self(deb822_edit::Paragraph::new())
     }
 }
 
@@ -1349,7 +1349,7 @@ impl std::fmt::Display for Release {
 }
 
 impl std::str::FromStr for Release {
-    type Err = deb822_lossless::ParseError;
+    type Err = deb822_edit::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Release::parse(s).to_result()
@@ -1357,16 +1357,16 @@ impl std::str::FromStr for Release {
 }
 
 impl AstNode for Release {
-    type Language = deb822_lossless::Lang;
+    type Language = deb822_edit::Lang;
 
     fn can_cast(kind: <Self::Language as rowan::Language>::Kind) -> bool {
-        deb822_lossless::Paragraph::can_cast(kind) || deb822_lossless::Deb822::can_cast(kind)
+        deb822_edit::Paragraph::can_cast(kind) || deb822_edit::Deb822::can_cast(kind)
     }
 
     fn cast(syntax: rowan::SyntaxNode<Self::Language>) -> Option<Self> {
-        if let Some(para) = deb822_lossless::Paragraph::cast(syntax.clone()) {
+        if let Some(para) = deb822_edit::Paragraph::cast(syntax.clone()) {
             Some(Release(para))
-        } else if let Some(deb822) = deb822_lossless::Deb822::cast(syntax) {
+        } else if let Some(deb822) = deb822_edit::Deb822::cast(syntax) {
             deb822.paragraphs().next().map(Release)
         } else {
             None

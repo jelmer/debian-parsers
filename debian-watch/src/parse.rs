@@ -675,7 +675,7 @@ impl ParsedEntry {
 /// `URL`) without spelling out two lookups at every call site.
 #[cfg(feature = "deb822")]
 fn deb822_field_range(
-    paragraph: &deb822_lossless::Paragraph,
+    paragraph: &deb822_edit::Paragraph,
     names: &[&str],
 ) -> Option<rowan::TextRange> {
     for name in names {
@@ -1157,7 +1157,7 @@ enum ParseInner {
     #[cfg(feature = "linebased")]
     LineBased(crate::linebased::Parse<crate::linebased::WatchFile>),
     #[cfg(feature = "deb822")]
-    Deb822(deb822_lossless::Parse<deb822_lossless::Deb822>),
+    Deb822(deb822_edit::Parse<deb822_edit::Deb822>),
 }
 
 impl Parse {
@@ -1171,15 +1171,13 @@ impl Parse {
                 ParseInner::LineBased(crate::linebased::parse_watch_file(text))
             }
             #[cfg(feature = "deb822")]
-            Some(WatchFileVersion::Deb822) => {
-                ParseInner::Deb822(deb822_lossless::Deb822::parse(text))
-            }
+            Some(WatchFileVersion::Deb822) => ParseInner::Deb822(deb822_edit::Deb822::parse(text)),
             #[cfg(not(feature = "linebased"))]
             Some(WatchFileVersion::LineBased(_)) => {
                 // Fallback to storing text if linebased feature is not enabled
                 #[cfg(feature = "deb822")]
                 {
-                    ParseInner::Deb822(deb822_lossless::Deb822::parse(text))
+                    ParseInner::Deb822(deb822_edit::Deb822::parse(text))
                 }
                 #[cfg(not(feature = "deb822"))]
                 {
@@ -1207,7 +1205,7 @@ impl Parse {
                 #[cfg(not(feature = "linebased"))]
                 #[cfg(feature = "deb822")]
                 {
-                    ParseInner::Deb822(deb822_lossless::Deb822::parse(text))
+                    ParseInner::Deb822(deb822_edit::Deb822::parse(text))
                 }
                 #[cfg(not(any(feature = "linebased", feature = "deb822")))]
                 {
