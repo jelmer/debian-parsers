@@ -12,9 +12,14 @@ keywords = ["debian", "deb822", "control", "rfc822"]
 
 [dependencies]
 deb822-derive = { path = "../deb822-derive", version = "^0.3", optional = true }
+futures = { version = "0.3", optional = true }
+
+[dev-dependencies]
+futures = { version = "0.3", features = ["executor"] }
 
 [features]
 derive = ["dep:deb822-derive"]
+stream = ["dep:futures"]
 
 [[test]]
 path = "tests/field_formatting.rs"
