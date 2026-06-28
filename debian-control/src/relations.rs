@@ -42,9 +42,9 @@ pub enum VersionConstraint {
     LessThanEqual, // <=
     /// =
     Equal, // =
-    /// >>
+    /// \>\>
     GreaterThan, // >>
-    /// >=
+    /// \>=
     GreaterThanEqual, // >=
 }
 
