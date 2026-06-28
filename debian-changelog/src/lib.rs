@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 //! A lossless parser for Debian changelog files.
 //!
-//! See https://manpages.debian.org/bookworm/dpkg-dev/deb-changelog.5.en.html
+//! See <https://manpages.debian.org/bookworm/dpkg-dev/deb-changelog.5.en.html>
 //!
 //! For its format specification, see [Debian Policy](https://www.debian.org/doc/debian-policy/ch-source.html#debian-changelog-debian-changelog).
 //!

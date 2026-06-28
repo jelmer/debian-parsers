@@ -5,7 +5,7 @@ use crate::Version;
 ///
 /// This function mangles a version string to be used as a git tag,
 /// following the Debian version mangling rules described in
-/// DEP-14 (https://dep-team.pages.debian.net/deps/dep14/).
+/// DEP-14 (<https://dep-team.pages.debian.net/deps/dep14/>).
 pub fn mangle_version_for_git(version: &Version) -> String {
     let version = version.to_string();
     // See https://dep-team.pages.debian.net/deps/dep14/
