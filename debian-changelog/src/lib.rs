@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 //! A lossless parser for Debian changelog files.
 //!
-//! See https://manpages.debian.org/bookworm/dpkg-dev/deb-changelog.5.en.html
+//! See <https://manpages.debian.org/bookworm/dpkg-dev/deb-changelog.5.en.html>
 //!
 //! For its format specification, see [Debian Policy](https://www.debian.org/doc/debian-policy/ch-source.html#debian-changelog-debian-changelog).
 //!
@@ -1094,7 +1094,7 @@ pub fn gbp_dch(path: &std::path::Path) -> std::result::Result<(), std::io::Error
 /// * `changelog` - The changelog to iterate over
 ///
 /// # Returns
-/// An iterator over tuples of (author_name, author_email, Vec<Entry>)
+/// An iterator over tuples of (author_name, author_email, Vec\<Entry\>)
 pub fn iter_entries_by_author(
     changelog: &ChangeLog,
 ) -> impl Iterator<Item = (String, String, Vec<Entry>)> + '_ {

@@ -384,7 +384,7 @@ impl Repositories {
     ///
     /// <div class="warning">
     /// This loads all repositories from all files, but information about which file they're
-    /// loaded from is **lost** in the process.u
+    /// loaded from is **lost** in the process.
     /// </div>
     pub fn load_from_directory(path: &Path) -> (Self, Vec<LoadError>) {
         use std::fs;
