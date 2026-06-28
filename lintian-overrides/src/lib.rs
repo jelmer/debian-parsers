@@ -399,7 +399,7 @@ impl OverrideLine {
     }
 
     /// Get the package type from the package spec (e.g., "source", "binary", "udeb")
-    /// The package spec can be in format "package-name type:", "package-name [ archlist ] type", or just "type:"
+    /// The package spec can be in format "package-name type:", "package-name \[ archlist \] type", or just "type:"
     pub fn package_type(&self) -> Option<String> {
         self.package_spec()?.package_type()
     }
