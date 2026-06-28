@@ -257,7 +257,7 @@ impl<T> Parse<T> {
     ///
     /// The tree is returned even when there are parse errors, since the parser
     /// always produces a valid (possibly incomplete) green tree. Callers that
-    /// need to distinguish error-free parses should check [`errors()`] first.
+    /// need to distinguish error-free parses should check [`Self::errors()`] first.
     pub fn tree(&self) -> T
     where
         T: AstNode<Language = Lang>,
@@ -275,7 +275,7 @@ impl<T> Parse<T> {
     ///
     /// The tree is returned even when there are parse errors, since the parser
     /// always produces a valid (possibly incomplete) green tree. Callers that
-    /// need to distinguish error-free parses should check [`errors()`] first.
+    /// need to distinguish error-free parses should check [`Self::errors()`] first.
     pub fn tree_mut(&self) -> T
     where
         T: AstNode<Language = Lang>,
