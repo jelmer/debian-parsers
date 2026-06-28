@@ -2110,7 +2110,7 @@ impl Maintainer {
 /// current syntax. For old-style entries the header and body are not broken
 /// down into structured tokens, so accessors such as [`Entry::header`],
 /// [`Entry::version`] and [`Entry::maintainer`] return `None`; use
-/// [`Entry::is_old_style`] to detect them and [`Entry::to_string`] to access
+/// [`Entry::is_old_style`] to detect them and [`ToString::to_string`] to access
 /// their verbatim text.
 pub struct Entry(SyntaxNode);
 
@@ -2172,7 +2172,7 @@ impl Entry {
     /// Old-style entries are kept verbatim: their header and body are not
     /// broken down into structured tokens, so the structured accessors
     /// ([`Entry::header`], [`Entry::version`], [`Entry::maintainer`], etc.)
-    /// return `None`. Use [`Entry::to_string`] to access their text.
+    /// return `None`. Use [`ToString::to_string`] to access their text.
     pub fn is_old_style(&self) -> bool {
         self.0.kind() == OLD_ENTRY
     }
