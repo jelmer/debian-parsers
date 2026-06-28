@@ -1545,7 +1545,7 @@ impl ChangeLog {
 
     /// Iterator over entries grouped by their maintainer (author).
     ///
-    /// Returns an iterator over tuples of (maintainer_name, maintainer_email, Vec<Entry>)
+    /// Returns an iterator over tuples of (maintainer_name, maintainer_email, Vec\<Entry\>)
     /// where entries with the same maintainer are grouped together.
     pub fn iter_by_author(&self) -> impl Iterator<Item = (String, String, Vec<Entry>)> + '_ {
         crate::iter_entries_by_author(self)

@@ -1094,7 +1094,7 @@ pub fn gbp_dch(path: &std::path::Path) -> std::result::Result<(), std::io::Error
 /// * `changelog` - The changelog to iterate over
 ///
 /// # Returns
-/// An iterator over tuples of (author_name, author_email, Vec<Entry>)
+/// An iterator over tuples of (author_name, author_email, Vec\<Entry\>)
 pub fn iter_entries_by_author(
     changelog: &ChangeLog,
 ) -> impl Iterator<Item = (String, String, Vec<Entry>)> + '_ {
