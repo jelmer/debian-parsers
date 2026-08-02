@@ -10,6 +10,7 @@ authors = ["Jelmer Vernooij <jelmer@jelmer.uk>"]
 
 [dependencies]
 chrono = { version = "0.4.44", optional = true }
+jiff = { version = "0.2.35", optional = true }
 debversion = ">=0.4.6, <0.6"
 lazy-regex = ">=3, <4"
 log = "0.4"
@@ -21,6 +22,8 @@ whoami = { version = ">=1.5, <2", default-features = false }
 [features]
 default = ["chrono"]
 merge = ["dep:merge3"]
+chrono = ["dep:chrono"]
+jiff = ["dep:jiff"]
 
 [dev-dependencies]
 flate2 = "1.1"

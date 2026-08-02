@@ -28,6 +28,9 @@ pub mod patchkit;
 
 pub use lossy::PatchHeader;
 
+/// Format of the `Last-Update` field, as specified by DEP-3.
+pub const DATE_FORMAT: &str = "%Y-%m-%d";
+
 /// Find the byte offset where the DEP-3 header in `content` ends, i.e.
 /// the start of the first `---` / `diff ` / `Index:` line. Returns
 /// `content.len()` if the file is header-only (no diff body).
