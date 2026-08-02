@@ -20,12 +20,15 @@
 use crate::fields::*;
 use deb822_fast::{FromDeb822, FromDeb822Paragraph, Paragraph, ToDeb822, ToDeb822Paragraph};
 
+/// The `last_update` field is a `chrono::NaiveDate` today. Routing the deb822
+/// conversions through this pair keeps the date type in one place, so chrono could
+/// be made optional without touching the field's callers.
 fn deserialize_date(s: &str) -> Result<chrono::NaiveDate, String> {
-    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| e.to_string())
+    chrono::NaiveDate::parse_from_str(s, crate::DATE_FORMAT).map_err(|e| e.to_string())
 }
 
 fn serialize_date(date: &chrono::NaiveDate) -> String {
-    date.format("%Y-%m-%d").to_string()
+    date.format(crate::DATE_FORMAT).to_string()
 }
 
 fn deserialize_origin(s: &str) -> Result<(Option<OriginCategory>, Origin), String> {
@@ -113,6 +116,25 @@ impl PatchHeader {
             .join("\n");
         Some(decoded)
     }
+
+    /// The `Last-Update` field, in `YYYY-MM-DD` form.
+    pub fn last_update_str(&self) -> Option<String> {
+        self.last_update.as_ref().map(serialize_date)
+    }
+
+    /// The `Last-Update` field as a [`jiff::civil::Date`].
+    ///
+    /// Returns `None` if the field is absent or is not a valid `YYYY-MM-DD` date.
+    #[cfg(feature = "jiff")]
+    pub fn last_update_jiff(&self) -> Option<jiff::civil::Date> {
+        jiff::civil::Date::strptime(crate::DATE_FORMAT, self.last_update_str()?.as_str()).ok()
+    }
+
+    /// Set the `Last-Update` field from a [`jiff::civil::Date`].
+    #[cfg(feature = "jiff")]
+    pub fn set_last_update_jiff(&mut self, date: jiff::civil::Date) {
+        self.last_update = deserialize_date(&date.strftime(crate::DATE_FORMAT).to_string()).ok();
+    }
 }
 
 impl std::fmt::Display for PatchHeader {
@@ -174,7 +196,7 @@ Bug-Debian: http://bugs.debian.org/510219
             Some("Ulrich Drepper <drepper@redhat.com>".to_string())
         );
         assert_eq!(header.reviewed_by, None);
-        assert_eq!(header.last_update, None);
+        assert_eq!(header.last_update_str(), None);
         assert_eq!(header.applied_upstream, None);
         assert_eq!(
             header.bug,
@@ -217,10 +239,7 @@ Last-Update: 2006-12-21
             Some("John Doe <johndoe-guest@users.alioth.debian.org>".to_string())
         );
         assert_eq!(header.reviewed_by, None);
-        assert_eq!(
-            header.last_update,
-            Some(chrono::NaiveDate::from_ymd_opt(2006, 12, 21).unwrap())
-        );
+        assert_eq!(header.last_update_str(), Some("2006-12-21".to_string()));
         assert_eq!(header.applied_upstream, None);
         assert_eq!(
             header.description,
@@ -294,7 +313,7 @@ Author: Thiemo Seufer <ths@debian.org>
             Some("Thiemo Seufer <ths@debian.org>".to_string())
         );
         assert_eq!(header.reviewed_by, None);
-        assert_eq!(header.last_update, None);
+        assert_eq!(header.last_update_str(), None);
         assert_eq!(header.applied_upstream, None);
         assert_eq!(
             header.bug_debian,
@@ -335,10 +354,7 @@ Last-Update: 2010-03-29
             Some("John Doe <johndoe-guest@users.alioth.debian.org>".to_string())
         );
         assert_eq!(header.reviewed_by, None);
-        assert_eq!(
-            header.last_update,
-            Some(chrono::NaiveDate::from_ymd_opt(2010, 3, 29).unwrap())
-        );
+        assert_eq!(header.last_update_str(), Some("2010-03-29".to_string()));
         assert_eq!(
             header.applied_upstream,
             Some(super::AppliedUpstream::Other(Cow::Borrowed(
@@ -348,6 +364,36 @@ Last-Update: 2010-03-29
         assert_eq!(
             header.description,
             Some("Fix widget frobnication speeds\nFrobnicating widgets too quickly tended to cause explosions.".to_string())
+        );
+    }
+
+    #[cfg(feature = "jiff")]
+    #[test]
+    fn test_last_update_jiff_roundtrip() {
+        use std::str::FromStr;
+        let mut header = PatchHeader::from_str("Description: Test\n").unwrap();
+        header.set_last_update_jiff(jiff::civil::date(2023, 5, 15));
+        assert_eq!(
+            header.last_update_jiff(),
+            Some(jiff::civil::date(2023, 5, 15))
+        );
+        assert_eq!(header.last_update_str(), Some("2023-05-15".to_string()));
+    }
+
+    /// The jiff setter writes through to the chrono-typed field, so both views agree.
+    #[cfg(feature = "jiff")]
+    #[test]
+    fn test_last_update_jiff_and_chrono_agree() {
+        use std::str::FromStr;
+        let mut header = PatchHeader::from_str("Description: Test\n").unwrap();
+        header.set_last_update_jiff(jiff::civil::date(2023, 5, 15));
+        assert_eq!(
+            header.last_update,
+            chrono::NaiveDate::from_ymd_opt(2023, 5, 15)
+        );
+        assert_eq!(
+            header.last_update_jiff(),
+            Some(jiff::civil::date(2023, 5, 15))
         );
     }
 }
