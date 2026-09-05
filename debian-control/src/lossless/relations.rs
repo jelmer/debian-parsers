@@ -835,16 +835,14 @@ impl Relations {
         }
 
         if num_entries == 1 {
-            // Single entry - check if there's a pattern after it
+            // Single entry - honour whatever follows the comma, including an
+            // empty pattern (source has no whitespace after the comma).
             if let Some(node) = entries[0].0.next_sibling_or_token() {
                 if node.kind() == COMMA {
-                    let pattern = Self::collect_whitespace(node.next_sibling_or_token());
-                    if !pattern.is_empty() {
-                        return pattern;
-                    }
+                    return Self::collect_whitespace(node.next_sibling_or_token());
                 }
             }
-            return default.to_string(); // Use default for single entry with no pattern
+            return default.to_string(); // No comma found, fall back to default
         }
 
         // Count whitespace patterns after commas (excluding the last entry)
@@ -866,12 +864,12 @@ impl Relations {
                     }
                 }
 
-                // Found comma, collect all whitespace/newlines after it
+                // Found comma, collect all whitespace/newlines after it.
+                // Empty patterns (no whitespace after comma) count too, so
+                // "foo,bar" style stays consistent when we append.
                 if node.kind() == COMMA {
                     let pattern = Self::collect_whitespace(node.next_sibling_or_token());
-                    if !pattern.is_empty() {
-                        *whitespace_counts.entry(pattern).or_insert(0) += 1;
-                    }
+                    *whitespace_counts.entry(pattern).or_insert(0) += 1;
                 }
             }
         }
@@ -937,11 +935,26 @@ impl Relations {
             let to_insert = if idx == 0 {
                 vec![entry.0.green().into()]
             } else if has_trailing_comma {
-                vec![
-                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), whitespace.as_str())),
+                // The list already ends with a comma. Insert the new entry
+                // after it, preserving the between-entries whitespace policy
+                // (odd syntax reuses the after-comma whitespace here since the
+                // comma is already in place), and re-emit a trailing comma.
+                let (sep_ws, before_comma_ws) = match &odd_syntax {
+                    Some((before_ws, after_ws)) => (after_ws.as_str(), before_ws.as_str()),
+                    None => (whitespace.as_str(), ""),
+                };
+                let mut nodes = vec![
+                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), sep_ws)),
                     entry.0.green().into(),
-                    NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
-                ]
+                ];
+                if !before_comma_ws.is_empty() {
+                    nodes.push(NodeOrToken::Token(GreenToken::new(
+                        WHITESPACE.into(),
+                        before_comma_ws,
+                    )));
+                }
+                nodes.push(NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")));
+                nodes
             } else if let Some((before_ws, after_ws)) = &odd_syntax {
                 let mut nodes = Self::build_odd_syntax_nodes(before_ws, after_ws);
                 nodes.push(entry.0.green().into());
@@ -4517,20 +4530,33 @@ Description: test
 
     #[test]
     fn test_append_with_null_element() {
-        // "null elements (,,)" shall be retained in their original position
+        // "null elements (,,)" shall be retained in their original position.
+        // Source has no whitespace between entries, so appended entry also
+        // has none.
         let (mut relations, errors) = Relations::parse_relaxed("foo,bar,,", false);
         assert!(errors.is_empty());
         let entry = Entry::from(Relation::simple("baz"));
         relations.add_dependency(entry, None);
-        assert_eq!(relations.to_string(), "foo,bar,, baz,");
+        assert_eq!(relations.to_string(), "foo,bar,,baz,");
     }
 
     #[test]
     fn test_append_without_trailing_comma_stays_without_one() {
+        // Source has no whitespace after commas, so appended entry follows suit.
         let mut relations: Relations = "foo,bar".parse().unwrap();
         let entry = Entry::from(Relation::simple("baz"));
         relations.add_dependency(entry, None);
-        assert_eq!(relations.to_string(), "foo,bar, baz");
+        assert_eq!(relations.to_string(), "foo,bar,baz");
+    }
+
+    #[test]
+    fn test_append_with_odd_syntax_and_trailing_comma() {
+        // Odd syntax (space before comma) combined with a trailing comma:
+        // the appended entry should keep the odd pattern and the trailing comma.
+        let mut relations: Relations = "\n foo\n , bar\n ,\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("baz"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "\n foo\n , bar\n , baz\n ,");
     }
 
     #[test]
