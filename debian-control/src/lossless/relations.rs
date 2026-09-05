@@ -901,9 +901,17 @@ impl Relations {
     pub fn insert_with_separator(&mut self, idx: usize, entry: Entry, default_sep: Option<&str>) {
         let is_empty = self.entries().next().is_none();
         let whitespace = self.detect_whitespace_pattern(default_sep.unwrap_or(" "));
+        let is_append = self.entries().nth(idx).is_none();
 
         // Strip trailing whitespace first
         self.strip_trailing_whitespace();
+
+        // Remember optional trailing comma
+        let has_trailing_comma = is_append
+            && matches!(
+                self.0.children_with_tokens().last(),
+                Some(NodeOrToken::Token(t)) if t.kind() == COMMA
+            );
 
         // Detect odd syntax (whitespace before comma)
         let odd_syntax = self.detect_odd_syntax();
@@ -928,6 +936,12 @@ impl Relations {
             let child_count = self.0.children_with_tokens().count();
             let to_insert = if idx == 0 {
                 vec![entry.0.green().into()]
+            } else if has_trailing_comma {
+                vec![
+                    NodeOrToken::Token(GreenToken::new(WHITESPACE.into(), whitespace.as_str())),
+                    entry.0.green().into(),
+                    NodeOrToken::Token(GreenToken::new(COMMA.into(), ",")),
+                ]
             } else if let Some((before_ws, after_ws)) = &odd_syntax {
                 let mut nodes = Self::build_odd_syntax_nodes(before_ws, after_ws);
                 nodes.push(entry.0.green().into());
@@ -4487,9 +4501,36 @@ Description: test
     #[test]
     fn test_append_with_newline_no_trailing() {
         let mut relations: Relations = "foo,\n bar".parse().unwrap();
-        let entry = Entry::from(Relation::simple("blah"));
+        let entry = Entry::from(Relation::simple("baz"));
         relations.add_dependency(entry, None);
-        assert_eq!(relations.to_string(), "foo,\n bar,\n blah");
+        assert_eq!(relations.to_string(), "foo,\n bar,\n baz");
+    }
+
+    #[test]
+    fn test_append_with_trailing_comma() {
+        // If old list ended with comma, modified list shall end with comma
+        let mut relations: Relations = "foo,\n bar,\n".parse().unwrap();
+        let entry = Entry::from(Relation::simple("baz"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,\n bar,\n baz,");
+    }
+
+    #[test]
+    fn test_append_with_null_element() {
+        // "null elements (,,)" shall be retained in their original position
+        let (mut relations, errors) = Relations::parse_relaxed("foo,bar,,", false);
+        assert!(errors.is_empty());
+        let entry = Entry::from(Relation::simple("baz"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,bar,, baz,");
+    }
+
+    #[test]
+    fn test_append_without_trailing_comma_stays_without_one() {
+        let mut relations: Relations = "foo,bar".parse().unwrap();
+        let entry = Entry::from(Relation::simple("baz"));
+        relations.add_dependency(entry, None);
+        assert_eq!(relations.to_string(), "foo,bar, baz");
     }
 
     #[test]
