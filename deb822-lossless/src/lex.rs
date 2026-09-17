@@ -55,8 +55,14 @@ fn lex_(mut input: &str, mut start_of_line: bool) -> impl Iterator<Item = (Synta
                     Some((SyntaxKind::COLON, ":"))
                 }
                 _ if common::is_newline(c) => {
-                    let char_len = c.len_utf8();
-                    let (nl, remaining) = input.split_at(char_len);
+                    // A CRLF sequence is a single line ending; splitting it
+                    // would make the LF look like an empty line.
+                    let nl_len = if input.starts_with("\r\n") {
+                        2
+                    } else {
+                        c.len_utf8()
+                    };
+                    let (nl, remaining) = input.split_at(nl_len);
                     input = remaining;
                     start_of_line = true;
                     colon_count = 0;
@@ -345,6 +351,46 @@ Section: vcs
                 (INDENT, " "),
                 (VALUE, ":value"),
                 (NEWLINE, "\n")
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lex_crlf() {
+        let text = "Depends: foo,\r\n bar\r\n";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+
+        assert_eq!(
+            tokens,
+            vec![
+                (KEY, "Depends"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "foo,"),
+                (NEWLINE, "\r\n"),
+                (INDENT, " "),
+                (VALUE, "bar"),
+                (NEWLINE, "\r\n"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_lex_lone_cr() {
+        let text = "Depends: foo,\r bar\r";
+        let tokens = super::lex(text).collect::<Vec<_>>();
+
+        assert_eq!(
+            tokens,
+            vec![
+                (KEY, "Depends"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "foo,"),
+                (NEWLINE, "\r"),
+                (INDENT, " "),
+                (VALUE, "bar"),
+                (NEWLINE, "\r"),
             ]
         );
     }
