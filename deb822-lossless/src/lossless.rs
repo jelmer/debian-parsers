@@ -5870,3 +5870,46 @@ Standards-Version: 4.7.0
     // Round-trip
     assert_eq!(deb822.to_string(), text);
 }
+
+#[test]
+fn test_parse_crlf() {
+    let text = "Depends: foo,\r\n bar\r\n";
+    let parsed = Deb822::parse(text);
+    assert_eq!(parsed.positioned_errors(), &[]);
+    let deb822 = parsed.to_result().unwrap();
+    let para = deb822.paragraphs().next().unwrap();
+    assert_eq!(para.get("Depends").as_deref(), Some("foo,\nbar"));
+    assert_eq!(deb822.to_string(), text);
+}
+
+#[test]
+fn test_parse_crlf_paragraphs() {
+    let text = "Source: foo\r\nSection: net\r\n\r\nPackage: foo\r\nArchitecture: all\r\n";
+    let parsed = Deb822::parse(text);
+    assert_eq!(parsed.positioned_errors(), &[]);
+    let deb822 = parsed.to_result().unwrap();
+    let mut paras = deb822.paragraphs();
+    let p = paras.next().unwrap();
+    assert_eq!(p.get("Source").as_deref(), Some("foo"));
+    assert_eq!(p.get("Section").as_deref(), Some("net"));
+    let b = paras.next().unwrap();
+    assert_eq!(b.get("Package").as_deref(), Some("foo"));
+    assert_eq!(b.get("Architecture").as_deref(), Some("all"));
+    assert_eq!(paras.next(), None);
+    assert_eq!(deb822.to_string(), text);
+}
+
+#[test]
+fn test_crlf_roundtrip_with_edit() {
+    let text = "Source: foo\r\nSection: net\r\n";
+    let deb822: Deb822 = text.parse().unwrap();
+    let mut para = deb822.paragraphs().next().unwrap();
+    para.set("Priority", "optional");
+    assert_eq!(para.get("Source").as_deref(), Some("foo"));
+    assert_eq!(para.get("Section").as_deref(), Some("net"));
+    assert_eq!(para.get("Priority").as_deref(), Some("optional"));
+    assert_eq!(
+        deb822.to_string(),
+        "Source: foo\r\nSection: net\r\nPriority: optional\n"
+    );
+}
