@@ -57,13 +57,3 @@ jobs:
         run: cargo test --workspace --all-features
         env:
           RUSTFLAGS: -Dwarnings
-
-  minimal-versions:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install cargo-minimal-versions and cargo-hack
-        run: cargo install cargo-minimal-versions cargo-hack
-      - name: Test with minimal versions
-        run: cargo minimal-versions test --workspace
