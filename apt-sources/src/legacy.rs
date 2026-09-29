@@ -205,7 +205,7 @@ static RE: LazyLock<Regex> = LazyLock::new(|| {
         (\[(?P<options>[^]]*)]\s+)?                  # Catch options
         (?P<uri>\S+)\s+                            # Catch repository URI
         (?P<suite>\S+)\s+                          # Catch suite/distribution
-        (?P<components>(?:(?P<component>\w+)\s?)+) # Catch components (multiple)
+        (?P<components>(?:(?P<component>[\w./-]+)\s?)+) # Catch components (multiple)
         $",
     )
     .expect("Tested correct regular expression shall not fail!")
@@ -693,6 +693,23 @@ mod tests {
             text,
             "deb [allow-downgrade-to-insecure=yes] http://example.com/ubuntu jammy main"
         );
+    }
+
+    #[test]
+    fn test_components_with_dashes() {
+        let input = indoc!(
+            "
+            deb http://deb.debian.org/debian bookworm main contrib
+            deb http://deb.debian.org/debian bookworm main non-free-firmware
+            deb http://deb.debian.org/debian bookworm non-free
+        "
+        );
+        let repos =
+            LegacyRepositories::from_str(input).expect("Shall not fail for correct list entries!");
+        assert_eq!(repos.len(), 3);
+        assert_eq!(repos[0].components, vec!["main", "contrib"]);
+        assert_eq!(repos[1].components, vec!["main", "non-free-firmware"]);
+        assert_eq!(repos[2].components, vec!["non-free"]);
     }
 
     #[test]
