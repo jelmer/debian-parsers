@@ -362,6 +362,42 @@ impl OverrideLine {
         self.syntax.text_range()
     }
 
+    /// Return the `# ...` comment lines immediately preceding this override,
+    /// in source order.
+    ///
+    /// The chain stops at the first blank line or non-comment override, so the
+    /// result matches lintian's "justification": the block of comments
+    /// attached to this override.
+    pub fn preceding_comments(&self) -> Vec<Comment> {
+        let mut out = Vec::new();
+        let mut cursor = self.syntax.prev_sibling();
+        while let Some(node) = cursor {
+            let Some(line) = OverrideLine::cast(node.clone()) else {
+                break;
+            };
+            if line.is_empty() {
+                break;
+            }
+            if !line.is_comment() {
+                break;
+            }
+            if let Some(comment) = line.comment_token().map(Comment::new) {
+                out.push(comment);
+            }
+            cursor = node.prev_sibling();
+        }
+        out.reverse();
+        out
+    }
+
+    /// If this line is a comment, return its COMMENT token.
+    fn comment_token(&self) -> Option<SyntaxToken> {
+        self.syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|it| it.kind() == COMMENT)
+    }
+
     /// Get the info text
     pub fn info(&self) -> Option<String> {
         let tokens: Vec<_> = self
@@ -465,6 +501,62 @@ impl OverrideLine {
         }
 
         true
+    }
+}
+
+/// A `# ...` comment line attached to (or free-standing near) an override.
+///
+/// Wraps a single COMMENT token and offers text-oriented accessors that
+/// hide the leading `#` marker, so callers can work with the human-written
+/// content without touching the syntax tree directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    token: SyntaxToken,
+}
+
+impl Comment {
+    fn new(token: SyntaxToken) -> Self {
+        Self { token }
+    }
+
+    /// The raw comment text, including the leading `#`.
+    pub fn raw_text(&self) -> String {
+        self.token.text().to_string()
+    }
+
+    /// The comment body: the leading `#` and one optional trailing space are
+    /// stripped, leaving the human-written content. Trailing whitespace on
+    /// the line is preserved.
+    pub fn text(&self) -> String {
+        let raw = self.token.text();
+        let body = raw.strip_prefix('#').unwrap_or(raw);
+        body.strip_prefix(' ').unwrap_or(body).to_string()
+    }
+
+    /// Byte range in the source of the full comment token (leading `#`
+    /// included).
+    pub fn text_range(&self) -> rowan::TextRange {
+        self.token.text_range()
+    }
+
+    /// Byte range in the source of the comment body only: the leading `#`
+    /// and one optional space are excluded, so this range is what
+    /// [`Comment::text`] returns.
+    pub fn body_range(&self) -> rowan::TextRange {
+        let raw = self.token.text();
+        let range = self.token.text_range();
+        let start_offset = if let Some(rest) = raw.strip_prefix('#') {
+            1 + usize::from(rest.starts_with(' '))
+        } else {
+            0
+        };
+        let start = range.start() + rowan::TextSize::from(start_offset as u32);
+        rowan::TextRange::new(start, range.end())
+    }
+
+    /// Access the underlying token.
+    pub fn syntax(&self) -> &SyntaxToken {
+        &self.token
     }
 }
 
@@ -1258,6 +1350,74 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].is_comment());
         assert_eq!(lines[1].tag().unwrap().text(), "some-tag");
+    }
+
+    #[test]
+    fn test_preceding_comments_single_line() {
+        let text = "# This runs on linux.\nsome-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let tag_line = overrides.lines().find(|l| l.tag().is_some()).unwrap();
+        let comments = tag_line.preceding_comments();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].raw_text(), "# This runs on linux.");
+        assert_eq!(comments[0].text(), "This runs on linux.");
+        assert_eq!(&text[comments[0].text_range()], "# This runs on linux.",);
+        assert_eq!(&text[comments[0].body_range()], "This runs on linux.");
+    }
+
+    #[test]
+    fn test_preceding_comments_multi_line() {
+        let text = "# First line\n# Second line\nsome-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let tag_line = overrides.lines().find(|l| l.tag().is_some()).unwrap();
+        let comments = tag_line.preceding_comments();
+        assert_eq!(comments.len(), 2);
+        assert_eq!(comments[0].text(), "First line");
+        assert_eq!(comments[1].text(), "Second line");
+    }
+
+    #[test]
+    fn test_preceding_comments_stops_at_blank_line() {
+        let text = "# Stray comment\n\n# Attached comment\nsome-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let tag_line = overrides.lines().find(|l| l.tag().is_some()).unwrap();
+        let comments = tag_line.preceding_comments();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].text(), "Attached comment");
+    }
+
+    #[test]
+    fn test_preceding_comments_stops_at_other_override() {
+        let text = "other-tag\n# Attached comment\nsome-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let tag_line = overrides
+            .lines()
+            .find(|l| l.tag().map(|t| t.text() == "some-tag").unwrap_or(false))
+            .unwrap();
+        let comments = tag_line.preceding_comments();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].text(), "Attached comment");
+    }
+
+    #[test]
+    fn test_preceding_comments_empty_when_no_comments() {
+        let text = "some-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let tag_line = overrides.lines().next().unwrap();
+        assert!(tag_line.preceding_comments().is_empty());
+    }
+
+    #[test]
+    fn test_comment_body_range_without_leading_space() {
+        // A comment that lacks a space after `#` should still yield a sensible
+        // body range starting right after the `#`.
+        let text = "#no-space\nsome-tag\n";
+        let overrides = LintianOverrides::parse(text).ok().unwrap();
+        let tag_line = overrides.lines().find(|l| l.tag().is_some()).unwrap();
+        let comments = tag_line.preceding_comments();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].text(), "no-space");
+        assert_eq!(&text[comments[0].body_range()], "no-space");
     }
 
     #[test]
