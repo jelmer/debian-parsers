@@ -654,6 +654,71 @@ impl PackageSpec {
             .find(|t| t.kind() == PACKAGE_TYPE)
             .map(|t| t.text_range())
     }
+
+    /// Classify what `offset` falls on within the spec: a package-name token,
+    /// an architecture token inside the bracket list, a package-type keyword,
+    /// or none of the above (`Blank`, e.g. whitespace or punctuation). The
+    /// offset is treated inclusively at both ends of each named token so a
+    /// cursor at the end-of-word position still counts as "on" the token.
+    pub fn slot_at_offset(&self, offset: rowan::TextSize) -> SpecSlot {
+        let hit = self
+            .syntax
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .find(|t| {
+                matches!(t.kind(), PACKAGE_NAME | ARCH | PACKAGE_TYPE) && {
+                    let r = t.text_range();
+                    r.start() <= offset && offset <= r.end()
+                }
+            });
+        match hit {
+            Some(t) => {
+                let range = t.text_range();
+                let text = t.text().to_string();
+                match t.kind() {
+                    PACKAGE_NAME => SpecSlot::PackageName { text, range },
+                    ARCH => SpecSlot::Arch { text, range },
+                    PACKAGE_TYPE => SpecSlot::PackageType { text, range },
+                    _ => SpecSlot::Blank,
+                }
+            }
+            None => SpecSlot::Blank,
+        }
+    }
+}
+
+/// Which named token within a [`PackageSpec`] a cursor offset falls on.
+///
+/// Returned by [`PackageSpec::slot_at_offset`]. Callers use this to decide
+/// what kind of completion or hover information applies at a given cursor
+/// position without having to walk the syntax tree themselves.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecSlot {
+    /// The cursor is not on a named token (whitespace, brackets, colon, or
+    /// past the end of every word token).
+    Blank,
+    /// On the package-name token.
+    PackageName {
+        /// The full token text.
+        text: String,
+        /// Source range of the token.
+        range: rowan::TextRange,
+    },
+    /// On an architecture token inside the bracket list. `text` includes the
+    /// leading `!` for negated entries (e.g. `!amd64`).
+    Arch {
+        /// The full token text, including any leading `!`.
+        text: String,
+        /// Source range of the token.
+        range: rowan::TextRange,
+    },
+    /// On the package-type keyword (`source`, `binary`, or `udeb`).
+    PackageType {
+        /// The full token text.
+        text: String,
+        /// Source range of the token.
+        range: rowan::TextRange,
+    },
 }
 
 /// Parse a lintian-overrides file.
@@ -1950,5 +2015,90 @@ mod tests {
         let err = try_iter_overrides(&base).unwrap_err();
         assert_ne!(err.kind(), std::io::ErrorKind::NotFound);
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    fn spec(text: &str) -> PackageSpec {
+        let parsed = LintianOverrides::parse(text);
+        parsed
+            .tree()
+            .lines()
+            .next()
+            .unwrap()
+            .package_spec()
+            .unwrap()
+    }
+
+    #[test]
+    fn test_slot_at_offset_package_name() {
+        let s = spec("libcurl4: some-tag\n");
+        assert_eq!(
+            s.slot_at_offset(rowan::TextSize::from(4)),
+            SpecSlot::PackageName {
+                text: "libcurl4".to_string(),
+                range: rowan::TextRange::new(0.into(), 8.into()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_slot_at_offset_end_of_package_name() {
+        let s = spec("libcurl4: some-tag\n");
+        assert!(matches!(
+            s.slot_at_offset(rowan::TextSize::from(8)),
+            SpecSlot::PackageName { .. }
+        ));
+    }
+
+    #[test]
+    fn test_slot_at_offset_arch() {
+        let s = spec("foo [amd64]: some-tag\n");
+        assert_eq!(
+            s.slot_at_offset(rowan::TextSize::from(7)),
+            SpecSlot::Arch {
+                text: "amd64".to_string(),
+                range: rowan::TextRange::new(5.into(), 10.into()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_slot_at_offset_negated_arch_keeps_bang() {
+        let s = spec("foo [!amd64]: some-tag\n");
+        assert_eq!(
+            s.slot_at_offset(rowan::TextSize::from(7)),
+            SpecSlot::Arch {
+                text: "!amd64".to_string(),
+                range: rowan::TextRange::new(5.into(), 11.into()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_slot_at_offset_package_type() {
+        let s = spec("foo binary: some-tag\n");
+        assert!(matches!(
+            s.slot_at_offset(rowan::TextSize::from(6)),
+            SpecSlot::PackageType { .. }
+        ));
+    }
+
+    #[test]
+    fn test_slot_at_offset_between_tokens_is_blank() {
+        let s = spec("foo [amd64] binary: some-tag\n");
+        // The space between "]" and "binary".
+        assert_eq!(s.slot_at_offset(rowan::TextSize::from(11)), SpecSlot::Blank);
+    }
+
+    #[test]
+    fn test_slot_at_offset_on_colon_is_blank() {
+        let s = spec("foo: some-tag\n");
+        assert_eq!(
+            s.slot_at_offset(rowan::TextSize::from(3)),
+            SpecSlot::PackageName {
+                text: "foo".to_string(),
+                range: rowan::TextRange::new(0.into(), 3.into()),
+            }
+        );
+        assert_eq!(s.slot_at_offset(rowan::TextSize::from(4)), SpecSlot::Blank);
     }
 }
