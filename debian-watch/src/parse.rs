@@ -435,7 +435,12 @@ impl ParsedEntry {
 
     /// Get the script
     pub fn script(&self) -> Option<String> {
-        self.get_option("script")
+        match self {
+            #[cfg(feature = "linebased")]
+            ParsedEntry::LineBased(e) => e.script(),
+            #[cfg(feature = "deb822")]
+            ParsedEntry::Deb822(_) => self.get_option("script"),
+        }
     }
 
     /// Get the component name (empty for main paragraph)

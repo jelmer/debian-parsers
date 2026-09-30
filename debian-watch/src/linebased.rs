@@ -299,8 +299,17 @@ fn parse(text: &str) -> InternalParse {
                         _ => unreachable!(),
                     };
                     self.builder.start_node(kind.into());
-                    while is_field_token(self.current()) {
-                        self.bump();
+                    if kind == SCRIPT {
+                        // The script field is greedy: it can include arguments
+                        // (e.g. `uupdate --no-symlink`), so consume everything
+                        // until end-of-line, honouring line continuations.
+                        while !matches!(self.current(), Some(NEWLINE) | None) {
+                            self.bump();
+                        }
+                    } else {
+                        while is_field_token(self.current()) {
+                            self.bump();
+                        }
                     }
                     self.builder.finish_node();
                 }
@@ -2111,10 +2120,23 @@ impl VersionPolicyNode {
 
 impl ScriptNode {
     /// Returns the script string.
+    ///
+    /// A script may include arguments separated by whitespace
+    /// (e.g. `uupdate --no-symlink`); whitespace between tokens is
+    /// preserved, but line continuations (`\<newline>`) and any leading
+    /// or trailing whitespace are stripped.
     pub fn script(&self) -> String {
-        join_tokens(&self.0, |k| {
-            matches!(k, KEY | VALUE | EQUALS | COMMA | QUOTE)
-        })
+        let mut out = String::new();
+        for it in self.0.children_with_tokens() {
+            if let SyntaxElement::Token(token) = it {
+                match token.kind() {
+                    KEY | VALUE | EQUALS | COMMA | QUOTE => out.push_str(token.text()),
+                    WHITESPACE => out.push_str(token.text()),
+                    _ => {}
+                }
+            }
+        }
+        out.trim().to_string()
     }
 }
 
@@ -2411,6 +2433,36 @@ opts=repack,compression=xz,dversionmangle=s/\+ds//,repacksuffix=+ds \
                 .unwrap()
         );
         assert_eq!(entry.version(), Ok(Some(VersionPolicy::Debian)));
+    }
+
+    #[test]
+    fn test_script_with_arguments() {
+        // Real-world example from the dhcpcd package. The script field
+        // (`uupdate --no-symlink`) contains an argument, and the entry
+        // uses line continuations between every logical field.
+        const WATCH: &str = "version=4\n\
+                             opts=\"mode=git,pgpmode=gittag\" \\\n\
+                             https://github.com/NetworkConfiguration/dhcpcd.git refs/tags/v([\\d\\.]+) \\\n\
+                             debian uupdate --no-symlink\n";
+        let wf: super::WatchFile = WATCH.parse().unwrap();
+        assert_eq!(wf.version(), 4);
+        let entries = wf.entries().collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(
+            entry.url(),
+            "https://github.com/NetworkConfiguration/dhcpcd.git"
+        );
+        assert_eq!(
+            entry.matching_pattern(),
+            Some("refs/tags/v([\\d\\.]+)".into())
+        );
+        assert_eq!(entry.version(), Ok(Some(VersionPolicy::Debian)));
+        assert_eq!(entry.script(), Some("uupdate --no-symlink".into()));
+        assert_eq!(entry.mode(), Ok(Mode::Git));
+        assert_eq!(entry.pgpmode(), Ok(PgpMode::GitTag));
+        // Roundtrip must be byte-identical to preserve formatting.
+        assert_eq!(wf.to_string(), WATCH);
     }
 
     #[test]
