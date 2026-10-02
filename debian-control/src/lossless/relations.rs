@@ -2642,6 +2642,84 @@ impl Relation {
         }
     }
 
+    fn constraint_node(&self) -> Option<SyntaxNode> {
+        self.0
+            .children()
+            .find(|n| n.kind() == VERSION)?
+            .children()
+            .find(|n| n.kind() == CONSTRAINT)
+    }
+
+    /// Return the text range of the version constraint operator, if present.
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// let relation: Relation = "samba (>= 4.0)".parse().unwrap();
+    /// let range = relation.version_constraint_range().unwrap();
+    /// assert_eq!(&relation.to_string()[range], ">=");
+    /// ```
+    pub fn version_constraint_range(&self) -> Option<rowan::TextRange> {
+        self.constraint_node().map(|n| n.text_range())
+    }
+
+    /// Check whether the version constraint uses the obsolete `<` or `>`
+    /// operators.
+    ///
+    /// dpkg interprets these as `<=` and `>=` respectively, but they are no
+    /// longer allowed by Debian policy.
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// let relation: Relation = "samba (< 4.0)".parse().unwrap();
+    /// assert!(relation.has_obsolete_version_constraint());
+    /// let relation: Relation = "samba (<< 4.0)".parse().unwrap();
+    /// assert!(!relation.has_obsolete_version_constraint());
+    /// ```
+    pub fn has_obsolete_version_constraint(&self) -> bool {
+        self.obsolete_constraint_node().is_some()
+    }
+
+    fn obsolete_constraint_node(&self) -> Option<SyntaxNode> {
+        self.constraint_node()
+            .filter(|n| n.text() == "<" || n.text() == ">")
+    }
+
+    /// Replace an obsolete `<` or `>` operator with the equivalent `<=` or
+    /// `>=`, leaving the rest of the relation untouched.
+    ///
+    /// Returns whether the relation was changed.
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relation;
+    /// let mut relation: Relation = "samba (<4.0)".parse().unwrap();
+    /// assert!(relation.fix_obsolete_version_constraint());
+    /// assert_eq!(relation.to_string(), "samba (<=4.0)");
+    /// ```
+    pub fn fix_obsolete_version_constraint(&mut self) -> bool {
+        let Some(constraint) = self.obsolete_constraint_node() else {
+            return false;
+        };
+        let mut builder = GreenNodeBuilder::new();
+        builder.start_node(CONSTRAINT.into());
+        for token in constraint
+            .children_with_tokens()
+            .filter_map(|t| t.into_token())
+        {
+            builder.token(token.kind().into(), token.text());
+        }
+        builder.token(EQUAL.into(), "=");
+        builder.finish_node();
+        let idx = constraint.index();
+        constraint.parent().unwrap().splice_children(
+            idx..idx + 1,
+            vec![SyntaxNode::new_root_mut(builder.finish()).into()],
+        );
+        true
+    }
+
     /// Return an iterator over the architectures for this relation
     ///
     /// # Example
@@ -3856,6 +3934,66 @@ mod tests {
             "1.1".parse().unwrap(),
         )));
         assert_eq!("samba (>= 1.1)", rel.to_string());
+    }
+
+    #[test]
+    fn test_relation_obsolete_version_constraint() {
+        let rel: Relation = "samba (< 2.0)".parse().unwrap();
+        assert!(rel.has_obsolete_version_constraint());
+        assert_eq!(
+            Some((VersionConstraint::LessThanEqual, "2.0".parse().unwrap())),
+            rel.version()
+        );
+        assert_eq!("samba (< 2.0)", rel.to_string());
+
+        let rel: Relation = "samba (> 2.0)".parse().unwrap();
+        assert!(rel.has_obsolete_version_constraint());
+        assert_eq!(
+            Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())),
+            rel.version()
+        );
+
+        for modern in ["samba (<< 2.0)", "samba (>> 2.0)", "samba (= 2.0)", "samba"] {
+            let rel: Relation = modern.parse().unwrap();
+            assert!(!rel.has_obsolete_version_constraint(), "{}", modern);
+        }
+    }
+
+    #[test]
+    fn test_relation_version_constraint_range() {
+        let rel: Relation = "samba ( <  2.0)".parse().unwrap();
+        let range = rel.version_constraint_range().unwrap();
+        assert_eq!("<", &rel.to_string()[range]);
+
+        let rel: Relation = "samba".parse().unwrap();
+        assert_eq!(None, rel.version_constraint_range());
+    }
+
+    #[test]
+    fn test_relation_fix_obsolete_version_constraint() {
+        let mut rel: Relation = "samba ( >  2.0) [amd64]".parse().unwrap();
+        assert!(rel.fix_obsolete_version_constraint());
+        assert_eq!("samba ( >=  2.0) [amd64]", rel.to_string());
+        assert!(!rel.has_obsolete_version_constraint());
+        assert!(!rel.fix_obsolete_version_constraint());
+
+        let mut rel: Relation = "samba (<< 2.0)".parse().unwrap();
+        assert!(!rel.fix_obsolete_version_constraint());
+        assert_eq!("samba (<< 2.0)", rel.to_string());
+    }
+
+    #[test]
+    fn test_relations_fix_obsolete_version_constraint() {
+        let relations: Relations = "foo (< 1.0),\n bar (>> 2) | baz (>3)".parse().unwrap();
+        for entry in relations.entries() {
+            for mut relation in entry.relations() {
+                relation.fix_obsolete_version_constraint();
+            }
+        }
+        assert_eq!(
+            "foo (<= 1.0),\n bar (>> 2) | baz (>=3)",
+            relations.to_string()
+        );
     }
 
     #[test]
