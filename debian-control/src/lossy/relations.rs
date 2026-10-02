@@ -680,6 +680,19 @@ mod tests {
     }
 
     #[test]
+    fn test_obsolete_version_constraint() {
+        let parsed: Relations = "foo (< 1.0), bar (>2)".parse().unwrap();
+        assert_eq!(
+            parsed[0][0].version,
+            Some((VersionConstraint::LessThanEqual, "1.0".parse().unwrap()))
+        );
+        assert_eq!(
+            parsed[1][0].version,
+            Some((VersionConstraint::GreaterThanEqual, "2".parse().unwrap()))
+        );
+    }
+
+    #[test]
     fn test_architectures() {
         let input = "python3-dulwich [amd64 arm64 armhf i386 mips mips64el mipsel ppc64el s390x]";
         let parsed: Relations = input.parse().unwrap();

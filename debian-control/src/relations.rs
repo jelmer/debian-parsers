@@ -55,6 +55,9 @@ impl std::str::FromStr for VersionConstraint {
         match s {
             ">=" => Ok(VersionConstraint::GreaterThanEqual),
             "<=" => Ok(VersionConstraint::LessThanEqual),
+            // Obsolete forms, which dpkg interprets as >= and <=.
+            ">" => Ok(VersionConstraint::GreaterThanEqual),
+            "<" => Ok(VersionConstraint::LessThanEqual),
             "=" => Ok(VersionConstraint::Equal),
             ">>" => Ok(VersionConstraint::GreaterThan),
             "<<" => Ok(VersionConstraint::LessThan),
