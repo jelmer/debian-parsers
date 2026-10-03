@@ -219,8 +219,13 @@ fn parse(text: &str, allow_substvar: bool) -> Parse {
 
                 // Read IDENT and COLON tokens until we see R_PARENS
                 // This handles version strings with epochs (e.g., "1:2.3.2-2~")
-                while matches!(self.current(), Some(IDENT) | Some(COLON)) {
-                    self.bump();
+                // and, if allowed, substvars (e.g., "${binary:Version}").
+                loop {
+                    match self.current() {
+                        Some(IDENT) | Some(COLON) => self.bump(),
+                        Some(DOLLAR) if self.allow_substvar => self.parse_substvar(),
+                        _ => break,
+                    }
                 }
 
                 if self.current() == Some(R_PARENS) {
@@ -458,6 +463,7 @@ impl PartialEq for Relation {
     fn eq(&self, other: &Self) -> bool {
         self.try_name() == other.try_name()
             && self.version() == other.version()
+            && self.substvar_version() == other.substvar_version()
             && self.archqual() == other.archqual()
             && self.architectures().map(|x| x.collect::<HashSet<_>>())
                 == other.architectures().map(|x| x.collect::<HashSet<_>>())
@@ -1139,8 +1145,10 @@ impl Relations {
                 found = true;
                 let relation = relations.into_iter().next().unwrap();
 
-                // Check if update is needed
-                let should_update = if let Some((vc, ver)) = relation.version() {
+                // Check if update is needed; leave substvar versions alone
+                let should_update = if relation.has_substvar_version() {
+                    false
+                } else if let Some((vc, ver)) = relation.version() {
                     match vc {
                         VersionConstraint::GreaterThanEqual | VersionConstraint::GreaterThan => {
                             &ver < minimum_version
@@ -1216,7 +1224,9 @@ impl Relations {
                 found = true;
                 let relation = relations.into_iter().next().unwrap();
 
-                let should_update = if let Some((vc, ver)) = relation.version() {
+                let should_update = if relation.has_substvar_version() {
+                    false
+                } else if let Some((vc, ver)) = relation.version() {
                     vc != VersionConstraint::Equal || &ver != version
                 } else {
                     true
@@ -1992,6 +2002,10 @@ impl Entry {
             let Some(name) = r.try_name() else {
                 return false;
             };
+            // A substvar version can't be evaluated.
+            if r.has_substvar_version() {
+                return false;
+            }
             let actual = package_version.lookup_version(name.as_str());
             if let Some((vc, version)) = r.version() {
                 if let Some(actual) = actual {
@@ -2224,6 +2238,52 @@ impl From<Relation> for Entry {
 
 /// Helper function to tokenize a version string, handling epochs
 /// Version strings like "1:2.3.2-2~" need to be split into: IDENT("1"), COLON, IDENT("2.3.2-2~")
+/// Build a normalized VERSION node, using `tokenize` to emit the version.
+fn build_version(
+    builder: &mut GreenNodeBuilder,
+    vc: VersionConstraint,
+    tokenize: impl FnOnce(&mut GreenNodeBuilder),
+) {
+    builder.token(WHITESPACE.into(), " ");
+    builder.start_node(SyntaxKind::VERSION.into());
+    builder.token(L_PARENS.into(), "(");
+    builder.start_node(SyntaxKind::CONSTRAINT.into());
+    builder.token(
+        match vc {
+            VersionConstraint::GreaterThanEqual => R_ANGLE.into(),
+            VersionConstraint::LessThanEqual => L_ANGLE.into(),
+            VersionConstraint::Equal => EQUAL.into(),
+            VersionConstraint::GreaterThan => R_ANGLE.into(),
+            VersionConstraint::LessThan => L_ANGLE.into(),
+        },
+        vc.to_string().as_str(),
+    );
+    builder.finish_node();
+    builder.token(WHITESPACE.into(), " ");
+    tokenize(builder);
+    builder.token(R_PARENS.into(), ")");
+    builder.finish_node();
+}
+
+/// Copy the version text (including substvars) of a VERSION node.
+fn copy_version_text(builder: &mut GreenNodeBuilder, version_node: &SyntaxNode) {
+    for it in version_node.children_with_tokens() {
+        match it {
+            SyntaxElement::Token(t) if matches!(t.kind(), IDENT | COLON) => {
+                builder.token(t.kind().into(), t.text());
+            }
+            SyntaxElement::Node(n) if n.kind() == SUBSTVAR => {
+                builder.start_node(SUBSTVAR.into());
+                for t in n.children_with_tokens().filter_map(|it| it.into_token()) {
+                    builder.token(t.kind().into(), t.text());
+                }
+                builder.finish_node();
+            }
+            _ => {}
+        }
+    }
+}
+
 fn tokenize_version(builder: &mut GreenNodeBuilder, version: &Version) {
     let version_str = version.to_string();
 
@@ -2309,25 +2369,12 @@ impl Relation {
             builder.token(IDENT.into(), archqual.as_str());
         }
         if let Some((vc, version)) = self.version() {
-            builder.token(WHITESPACE.into(), " ");
-            builder.start_node(SyntaxKind::VERSION.into());
-            builder.token(L_PARENS.into(), "(");
-            builder.start_node(SyntaxKind::CONSTRAINT.into());
-            builder.token(
-                match vc {
-                    VersionConstraint::GreaterThanEqual => R_ANGLE.into(),
-                    VersionConstraint::LessThanEqual => L_ANGLE.into(),
-                    VersionConstraint::Equal => EQUAL.into(),
-                    VersionConstraint::GreaterThan => R_ANGLE.into(),
-                    VersionConstraint::LessThan => L_ANGLE.into(),
-                },
-                vc.to_string().as_str(),
-            );
-            builder.finish_node();
-            builder.token(WHITESPACE.into(), " ");
-            tokenize_version(&mut builder, &version);
-            builder.token(R_PARENS.into(), ")");
-            builder.finish_node();
+            build_version(&mut builder, vc, |b| tokenize_version(b, &version));
+        } else if let (Some((vc, _)), Some(version_node)) =
+            (self.substvar_version(), self.version_node())
+        {
+            // Substvar versions can't be parsed, so copy them verbatim.
+            build_version(&mut builder, vc, |b| copy_version_text(b, &version_node));
         }
         if let Some(architectures) = self.architectures() {
             builder.token(WHITESPACE.into(), " ");
@@ -2524,7 +2571,13 @@ impl Relation {
     }
 
     /// Return the version constraint and the version it is constrained to.
+    ///
+    /// Returns `None` if the version contains a substvar, since it can not be
+    /// represented as a [`Version`]; see [`Self::has_substvar_version`].
     pub fn version(&self) -> Option<(VersionConstraint, Version)> {
+        if self.has_substvar_version() {
+            return None;
+        }
         let vc = self.0.children().find(|n| n.kind() == VERSION);
         let vc = vc.as_ref()?;
         let constraint = vc.children().find(|n| n.kind() == CONSTRAINT);
@@ -2550,6 +2603,42 @@ impl Relation {
         } else {
             None
         }
+    }
+
+    /// Check whether the version of this relation contains a substvar.
+    ///
+    /// # Example
+    /// ```
+    /// use debian_control::lossless::relations::Relations;
+    /// let (relations, errors) = Relations::parse_relaxed("foo (= ${binary:Version})", true);
+    /// assert!(errors.is_empty());
+    /// let relation = relations.get_entry(0).unwrap().get_relation(0).unwrap();
+    /// assert!(relation.has_substvar_version());
+    /// assert_eq!(relation.version(), None);
+    /// ```
+    pub fn has_substvar_version(&self) -> bool {
+        self.version_node()
+            .is_some_and(|v| v.children().any(|n| n.kind() == SUBSTVAR))
+    }
+
+    fn version_node(&self) -> Option<SyntaxNode> {
+        self.0.children().find(|n| n.kind() == VERSION)
+    }
+
+    /// The version constraint and the literal version text, for relations
+    /// whose version contains a substvar.
+    fn substvar_version(&self) -> Option<(VersionConstraint, String)> {
+        if !self.has_substvar_version() {
+            return None;
+        }
+        let constraint = self.constraint_node()?.text().to_string().parse().ok()?;
+        let text = self
+            .version_node()?
+            .children_with_tokens()
+            .filter(|it| matches!(it.kind(), IDENT | COLON | SUBSTVAR))
+            .map(|it| it.to_string())
+            .collect();
+        Some((constraint, text))
     }
 
     /// Set the version constraint for this relation
@@ -3034,8 +3123,18 @@ impl Relation {
             return false;
         }
 
+        // A substvar version can't be compared, so only an identical one
+        // implies it.
+        if let Some(inner_substvar) = self.substvar_version() {
+            return outer.substvar_version() == Some(inner_substvar);
+        }
+
         let inner_version = self.version();
         let outer_version = outer.version();
+
+        if outer.has_substvar_version() {
+            return inner_version.is_none();
+        }
 
         // No version constraint on inner means it's always implied
         if inner_version.is_none() {
@@ -3193,7 +3292,7 @@ impl Ord for Relation {
             }
             (Some(_), None) => std::cmp::Ordering::Greater,
             (None, Some(_)) => std::cmp::Ordering::Less,
-            (None, None) => std::cmp::Ordering::Equal,
+            (None, None) => self.substvar_version().cmp(&other.substvar_version()),
         }
     }
 }
@@ -3279,6 +3378,8 @@ impl From<Relation> for crate::lossy::Relation {
     fn from(relation: Relation) -> Self {
         crate::lossy::Relation {
             name: relation.try_name().unwrap_or_default(),
+            // TODO: the lossy Relation can't represent substvar versions, so
+            // those are dropped here.
             version: relation.version(),
             archqual: relation.archqual(),
             architectures: relation.architectures().map(|a| a.collect()),
@@ -3934,6 +4035,107 @@ mod tests {
             "1.1".parse().unwrap(),
         )));
         assert_eq!("samba (>= 1.1)", rel.to_string());
+    }
+
+    fn parse_substvar_relation(s: &str) -> Relation {
+        let (relations, errors) = Relations::parse_relaxed(s, true);
+        assert_eq!(Vec::<String>::new(), errors);
+        assert_eq!(1, relations.entries().count());
+        let entry = relations.get_entry(0).unwrap();
+        assert_eq!(1, entry.relations().count());
+        entry.get_relation(0).unwrap()
+    }
+
+    #[test]
+    fn test_substvar_version() {
+        let rel = parse_substvar_relation("foo (= ${binary:Version})");
+        assert!(rel.has_substvar_version());
+        assert_eq!(None, rel.version());
+        assert_eq!("foo (= ${binary:Version})", rel.to_string());
+
+        let rel = parse_substvar_relation("foo (>= ${source:Upstream-Version}~)");
+        assert!(rel.has_substvar_version());
+        assert_eq!("foo (>= ${source:Upstream-Version}~)", rel.to_string());
+
+        let rel = parse_substvar_relation("foo (>= 1:2.0)");
+        assert!(!rel.has_substvar_version());
+    }
+
+    #[test]
+    fn test_substvar_version_not_allowed() {
+        let (_, errors) = Relations::parse_relaxed("foo (= ${binary:Version})", false);
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn test_substvar_version_mixed_field() {
+        let (relations, errors) = Relations::parse_relaxed(
+            "${misc:Depends}, foo (= ${binary:Version}), bar (>= 1)",
+            true,
+        );
+        assert_eq!(Vec::<String>::new(), errors);
+        assert_eq!(
+            vec!["foo (= ${binary:Version})", "bar (>= 1)"],
+            relations
+                .entries()
+                .map(|e| e.to_string().trim().to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_substvar_version_eq() {
+        let rel = parse_substvar_relation("foo (= ${binary:Version})");
+        assert_ne!(rel, "foo".parse::<Relation>().unwrap());
+        assert_ne!(rel, parse_substvar_relation("foo (= ${source:Version})"));
+        assert_ne!(rel, parse_substvar_relation("foo (>= ${binary:Version})"));
+        assert_eq!(rel, parse_substvar_relation("foo  (=  ${binary:Version})"));
+    }
+
+    #[test]
+    fn test_substvar_version_is_implied_by() {
+        let substvar = parse_substvar_relation("foo (= ${binary:Version})");
+        let plain: Relation = "foo".parse().unwrap();
+        let versioned: Relation = "foo (= 1.0)".parse().unwrap();
+        assert!(!substvar.is_implied_by(&plain));
+        assert!(!substvar.is_implied_by(&versioned));
+        assert!(plain.is_implied_by(&substvar));
+        assert!(!versioned.is_implied_by(&substvar));
+        assert!(substvar.is_implied_by(&parse_substvar_relation("foo (= ${binary:Version})")));
+        assert!(!substvar.is_implied_by(&parse_substvar_relation("foo (= ${source:Version})")));
+    }
+
+    #[test]
+    fn test_substvar_version_satisfied_by() {
+        let entry = Entry::from(vec![parse_substvar_relation("foo (= ${binary:Version})")]);
+        assert!(
+            !entry.satisfied_by(|_: &str| -> Option<debversion::Version> {
+                Some("1.0".parse().unwrap())
+            })
+        );
+    }
+
+    #[test]
+    fn test_substvar_version_ensure_version() {
+        let (mut relations, _) = Relations::parse_relaxed("foo (= ${binary:Version})", true);
+        relations.ensure_minimum_version("foo", &"2.0".parse().unwrap());
+        assert_eq!("foo (= ${binary:Version})", relations.to_string());
+        relations.ensure_exact_version("foo", &"2.0".parse().unwrap());
+        assert_eq!("foo (= ${binary:Version})", relations.to_string());
+    }
+
+    #[test]
+    fn test_substvar_version_wrap_and_sort() {
+        let rel = parse_substvar_relation("foo  (=${binary:Version})");
+        assert_eq!("foo (= ${binary:Version})", rel.wrap_and_sort().to_string());
+    }
+
+    #[test]
+    fn test_substvar_version_obsolete_constraint() {
+        let mut rel = parse_substvar_relation("foo (> ${binary:Version})");
+        assert!(rel.has_obsolete_version_constraint());
+        assert!(rel.fix_obsolete_version_constraint());
+        assert_eq!("foo (>= ${binary:Version})", rel.to_string());
     }
 
     #[test]
