@@ -16,9 +16,11 @@ default = []
 sqlx = ["sqlx/postgres"]
 python-debian = ["dep:pyo3"]
 serde = ["dep:serde"]
+jiff = ["dep:jiff"]
 
 [dependencies]
 chrono = { version = "0.4.38", default-features = false, features = ["alloc"] }
+jiff = { version = "0.2.35", default-features = false, features = ["alloc"], optional = true }
 lazy-regex = "3"
 num-bigint = "0.4.6"
 

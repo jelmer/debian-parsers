@@ -7,10 +7,14 @@ use debversion::Version;
 use rowan::ast::AstNode;
 use std::str::FromStr;
 
+/// Format of the timestamp in a changelog entry footer.
+#[cfg(any(feature = "chrono", feature = "jiff"))]
+const CHANGELOG_TIME_FORMAT: &str = "%a, %d %b %Y %H:%M:%S %z";
+
 /// Trait for types that can be converted to a timestamp string
 ///
-/// This trait allows both chrono DateTime types and plain strings to be used
-/// as timestamps in the changelog API.
+/// This trait allows chrono and jiff datetime types, as well as plain strings,
+/// to be used as timestamps in the changelog API.
 pub trait IntoTimestamp {
     /// Convert this value into a timestamp string in Debian changelog format
     fn into_timestamp(self) -> String;
@@ -34,8 +38,21 @@ where
     Tz::Offset: std::fmt::Display,
 {
     fn into_timestamp(self) -> String {
-        const CHANGELOG_TIME_FORMAT: &str = "%a, %d %b %Y %H:%M:%S %z";
         self.format(CHANGELOG_TIME_FORMAT).to_string()
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl IntoTimestamp for jiff::Zoned {
+    fn into_timestamp(self) -> String {
+        self.strftime(CHANGELOG_TIME_FORMAT).to_string()
+    }
+}
+
+#[cfg(feature = "jiff")]
+impl IntoTimestamp for &jiff::Zoned {
+    fn into_timestamp(self) -> String {
+        self.strftime(CHANGELOG_TIME_FORMAT).to_string()
     }
 }
 
@@ -1414,7 +1431,9 @@ impl ChangeLog {
             maintainer: crate::get_maintainer(),
             #[cfg(feature = "chrono")]
             timestamp_string: Some(chrono::Utc::now().into_timestamp()),
-            #[cfg(not(feature = "chrono"))]
+            #[cfg(all(feature = "jiff", not(feature = "chrono")))]
+            timestamp_string: Some(jiff::Zoned::now().into_timestamp()),
+            #[cfg(not(any(feature = "chrono", feature = "jiff")))]
             timestamp_string: None,
             change_lines: vec![],
         }
@@ -2363,13 +2382,28 @@ impl Entry {
     /// Set the datetime of the entry.
     #[cfg(feature = "chrono")]
     pub fn set_datetime(&mut self, datetime: DateTime<FixedOffset>) {
-        self.set_timestamp(format!("{}", datetime.format("%a, %d %b %Y %H:%M:%S %z")));
+        self.set_timestamp(datetime.format(CHANGELOG_TIME_FORMAT).to_string());
     }
 
     /// Returns the datetime of the entry.
     #[cfg(feature = "chrono")]
     pub fn datetime(&self) -> Option<DateTime<FixedOffset>> {
         self.timestamp().and_then(|ts| parse_time_string(&ts).ok())
+    }
+
+    /// Set the datetime of the entry, from a jiff timestamp.
+    #[cfg(feature = "jiff")]
+    pub fn set_datetime_jiff(&mut self, datetime: &jiff::Zoned) {
+        self.set_timestamp(datetime.strftime(CHANGELOG_TIME_FORMAT).to_string());
+    }
+
+    /// Returns the datetime of the entry, as a jiff timestamp.
+    ///
+    /// Returns `None` if the entry has no timestamp, or if it cannot be parsed.
+    #[cfg(feature = "jiff")]
+    pub fn datetime_jiff(&self) -> Option<jiff::Zoned> {
+        self.timestamp()
+            .and_then(|ts| parse_time_string_jiff(&ts).ok())
     }
 
     /// Returns the urgency of the entry, returning an error if the urgency is
@@ -2881,9 +2915,6 @@ impl Entry {
 }
 
 #[cfg(feature = "chrono")]
-const CHANGELOG_TIME_FORMAT: &str = "%a, %d %b %Y %H:%M:%S %z";
-
-#[cfg(feature = "chrono")]
 fn parse_time_string(time_str: &str) -> Result<DateTime<FixedOffset>, chrono::ParseError> {
     // First try parsing with day-of-week validation
     if let Ok(dt) = DateTime::parse_from_str(time_str, CHANGELOG_TIME_FORMAT) {
@@ -2898,6 +2929,23 @@ fn parse_time_string(time_str: &str) -> Result<DateTime<FixedOffset>, chrono::Pa
     } else {
         // If there's no comma, return the original error
         DateTime::parse_from_str(time_str, CHANGELOG_TIME_FORMAT)
+    }
+}
+
+#[cfg(feature = "jiff")]
+fn parse_time_string_jiff(time_str: &str) -> Result<jiff::Zoned, jiff::Error> {
+    // As above: prefer a strict parse, but fall back to skipping the day name so that
+    // changelogs with an incorrect day-of-week still parse.
+    if let Ok(zdt) =
+        jiff::fmt::strtime::parse(CHANGELOG_TIME_FORMAT, time_str).and_then(|tm| tm.to_zoned())
+    {
+        return Ok(zdt);
+    }
+
+    if let Some((_, after_comma)) = time_str.split_once(", ") {
+        jiff::fmt::strtime::parse("%d %b %Y %H:%M:%S %z", after_comma)?.to_zoned()
+    } else {
+        jiff::fmt::strtime::parse(CHANGELOG_TIME_FORMAT, time_str)?.to_zoned()
     }
 }
 
@@ -3507,6 +3555,80 @@ lintian-brush (0.35) UNRELEASED; urgency=medium
 "#,
             entry.to_string()
         );
+    }
+
+    #[test]
+    #[cfg(feature = "jiff")]
+    fn test_set_datetime_jiff() {
+        let mut entry: Entry = r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jelmer Vernooĳ <joe@example.com>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+        .parse()
+        .unwrap();
+
+        let dt = jiff::civil::date(2023, 9, 4)
+            .at(18, 13, 46, 0)
+            .in_tz("America/Chicago")
+            .unwrap();
+        entry.set_datetime_jiff(&dt);
+
+        assert_eq!(
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jelmer Vernooĳ <joe@example.com>  Mon, 04 Sep 2023 18:13:46 -0500
+"#,
+            entry.to_string()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "jiff")]
+    fn test_datetime_jiff() {
+        let entry: Entry = r#"breezy (3.3.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jelmer Vernooĳ <jelmer@debian.org>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+        .parse()
+        .unwrap();
+
+        let dt = entry.datetime_jiff().unwrap();
+        assert_eq!(2023, dt.year());
+        assert_eq!(9, dt.month());
+        assert_eq!(4, dt.day());
+        assert_eq!(18, dt.hour());
+        assert_eq!(13, dt.minute());
+        assert_eq!(45, dt.second());
+        assert_eq!(
+            "Mon, 04 Sep 2023 18:13:45 -0500",
+            dt.strftime(CHANGELOG_TIME_FORMAT).to_string()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "jiff")]
+    fn test_datetime_jiff_with_incorrect_day_of_week() {
+        // Mar 22 2011 was a Tuesday, not a Monday; parsing should still succeed.
+        let entry: Entry = r#"blah (0.1-2) UNRELEASED; urgency=medium
+
+  * New release.
+
+ -- Jelmer Vernooĳ <jelmer@debian.org>  Mon, 22 Mar 2011 16:47:42 +0000
+"#
+        .parse()
+        .unwrap();
+
+        let dt = entry.datetime_jiff().unwrap();
+        assert_eq!(2011, dt.year());
+        assert_eq!(3, dt.month());
+        assert_eq!(22, dt.day());
+        assert_eq!(16, dt.hour());
     }
 
     #[test]

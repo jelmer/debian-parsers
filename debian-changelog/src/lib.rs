@@ -990,7 +990,8 @@ const DEFAULT_DISTRIBUTION: &[&str] = &[UNRELEASED];
 /// * `cl` - The changelog to release
 /// * `distribution` - The distribution to release to. If None, the distribution
 ///   of the previous entry is used.
-/// * `timestamp` - The timestamp to use for the release. If None, the current time is used (requires chrono feature).
+/// * `timestamp` - The timestamp to use for the release. If None, the current time is used
+///   (requires the chrono or jiff feature).
 /// * `maintainer` - The maintainer to use for the release. If None, the maintainer
 ///   is extracted from the environment.
 ///
@@ -998,7 +999,7 @@ const DEFAULT_DISTRIBUTION: &[&str] = &[UNRELEASED];
 /// Whether a release was created.
 ///
 /// # Panics
-/// Panics if timestamp is None and the chrono feature is not enabled.
+/// Panics if timestamp is None and neither the chrono nor jiff feature is enabled.
 pub fn release(
     cl: &mut ChangeLog,
     distribution: Option<Vec<String>>,
@@ -1029,9 +1030,13 @@ pub fn release(
             {
                 chrono::offset::Utc::now().into_timestamp()
             }
-            #[cfg(not(feature = "chrono"))]
+            #[cfg(all(feature = "jiff", not(feature = "chrono")))]
             {
-                panic!("timestamp is required when chrono feature is disabled");
+                jiff::Zoned::now().into_timestamp()
+            }
+            #[cfg(not(any(feature = "chrono", feature = "jiff")))]
+            {
+                panic!("timestamp is required when neither the chrono nor jiff feature is enabled");
             }
         };
         first_entry.set_timestamp(timestamp_str);

@@ -114,17 +114,51 @@ impl PatchHeader {
     }
 
     /// Get the last update date of the patch.
+    #[deprecated(
+        since = "0.2.5",
+        note = "Use last_update_str or last_update_jiff instead"
+    )]
     pub fn last_update(&self) -> Option<chrono::NaiveDate> {
         self.0
             .get("Last-Update")
             .as_deref()
-            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, crate::DATE_FORMAT).ok())
     }
 
     /// Set the date of the last update
+    #[deprecated(
+        since = "0.2.5",
+        note = "Use set_last_update_str or set_last_update_jiff instead"
+    )]
     pub fn set_last_update(&mut self, date: chrono::NaiveDate) {
-        self.0
-            .insert("Last-Update", date.format("%Y-%m-%d").to_string().as_str());
+        self.0.insert(
+            "Last-Update",
+            date.format(crate::DATE_FORMAT).to_string().as_str(),
+        );
+    }
+
+    /// Get the raw `Last-Update` field, in `YYYY-MM-DD` form.
+    pub fn last_update_str(&self) -> Option<String> {
+        self.0.get("Last-Update")
+    }
+
+    /// Set the raw `Last-Update` field. The date should be in `YYYY-MM-DD` form.
+    pub fn set_last_update_str(&mut self, date: &str) {
+        self.0.insert("Last-Update", date);
+    }
+
+    /// Get the last update date of the patch as a [`jiff::civil::Date`].
+    ///
+    /// Returns `None` if the field is absent or is not a valid `YYYY-MM-DD` date.
+    #[cfg(feature = "jiff")]
+    pub fn last_update_jiff(&self) -> Option<jiff::civil::Date> {
+        jiff::civil::Date::strptime(crate::DATE_FORMAT, self.last_update_str()?.as_str()).ok()
+    }
+
+    /// Set the date of the last update from a [`jiff::civil::Date`].
+    #[cfg(feature = "jiff")]
+    pub fn set_last_update_jiff(&mut self, date: jiff::civil::Date) {
+        self.set_last_update_str(date.strftime(crate::DATE_FORMAT).to_string().as_str());
     }
 
     /// The `Applied-Upstream` field.
@@ -346,7 +380,7 @@ Bug-Debian: http://bugs.debian.org/510219
             Some("Ulrich Drepper <drepper@redhat.com>".to_string())
         );
         assert_eq!(header.reviewed_by(), Vec::<&str>::new());
-        assert_eq!(header.last_update(), None);
+        assert_eq!(header.last_update_str(), None);
         assert_eq!(header.applied_upstream(), None);
         assert_eq!(
             header.bugs().collect::<Vec<_>>(),
@@ -392,10 +426,7 @@ Last-Update: 2006-12-21
             Some("John Doe <johndoe-guest@users.alioth.debian.org>".to_string())
         );
         assert_eq!(header.reviewed_by(), Vec::<&str>::new());
-        assert_eq!(
-            header.last_update(),
-            Some(chrono::NaiveDate::from_ymd_opt(2006, 12, 21).unwrap())
-        );
+        assert_eq!(header.last_update_str(), Some("2006-12-21".to_string()));
         assert_eq!(header.applied_upstream(), None);
         assert_eq!(header.bugs().collect::<Vec<_>>(), vec![]);
         assert_eq!(
@@ -432,7 +463,7 @@ Author: Thiemo Seufer <ths@debian.org>
             Some("Thiemo Seufer <ths@debian.org>".to_string())
         );
         assert_eq!(header.reviewed_by(), Vec::<&str>::new());
-        assert_eq!(header.last_update(), None);
+        assert_eq!(header.last_update_str(), None);
         assert_eq!(header.applied_upstream(), None);
         assert_eq!(
             header.bugs().collect::<Vec<_>>(),
@@ -471,10 +502,7 @@ Last-Update: 2010-03-29
             Some("John Doe <johndoe-guest@users.alioth.debian.org>".to_string())
         );
         assert_eq!(header.reviewed_by(), Vec::<&str>::new());
-        assert_eq!(
-            header.last_update(),
-            Some(chrono::NaiveDate::from_ymd_opt(2010, 3, 29).unwrap())
-        );
+        assert_eq!(header.last_update_str(), Some("2010-03-29".to_string()));
         assert_eq!(
             header.applied_upstream(),
             Some(super::AppliedUpstream::Other(Cow::Borrowed(
@@ -547,6 +575,7 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_set_last_update() {
         let text = r#"Description: Fix widget frobnication speeds
 "#;
@@ -554,6 +583,28 @@ Bug-Ubuntu: http://bugs.launchpad.net/123
         let date = chrono::NaiveDate::from_ymd_opt(2023, 5, 15).unwrap();
         header.set_last_update(date);
         assert_eq!(header.last_update(), Some(date));
+    }
+
+    #[test]
+    fn test_set_last_update_str() {
+        let mut header = PatchHeader::new();
+        header.set_last_update_str("2023-05-15");
+        assert_eq!(header.last_update_str(), Some("2023-05-15".to_string()));
+    }
+
+    #[test]
+    #[cfg(feature = "jiff")]
+    fn test_last_update_jiff() {
+        let mut header = PatchHeader::new();
+        header.set_last_update_jiff(jiff::civil::date(2023, 5, 15));
+        assert_eq!(header.last_update_str(), Some("2023-05-15".to_string()));
+        assert_eq!(
+            header.last_update_jiff(),
+            Some(jiff::civil::date(2023, 5, 15))
+        );
+
+        let malformed = PatchHeader::from_str("Last-Update: not a date\n").unwrap();
+        assert_eq!(malformed.last_update_jiff(), None);
     }
 
     #[test]
