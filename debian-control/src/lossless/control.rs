@@ -1047,13 +1047,30 @@ impl Source {
     }
 
     /// Return the Rules-Requires-Root field
+    ///
+    /// Panics if the value is not valid; see [`Self::try_rules_requires_root`].
     pub fn rules_requires_root(&self) -> Option<bool> {
+        self.try_rules_requires_root().map(|r| r.unwrap())
+    }
+
+    /// Return the Rules-Requires-Root field, or an error if the value is not valid
+    ///
+    /// Only `no` means no root; `yes`, `binary-targets` and `<namespace>/<case>` keywords mean root.
+    pub fn try_rules_requires_root(&self) -> Option<Result<bool, String>> {
         self.paragraph
             .get("Rules-Requires-Root")
             .map(|s| match s.to_lowercase().as_str() {
-                "yes" => true,
-                "no" => false,
-                _ => panic!("invalid Rules-Requires-Root value"),
+                "no" => Ok(false),
+                "yes" | "binary-targets" => Ok(true),
+                v if !v.is_empty()
+                    && v.split_whitespace().all(|k| {
+                        k.split_once('/')
+                            .is_some_and(|(ns, case)| !ns.is_empty() && !case.is_empty())
+                    }) =>
+                {
+                    Ok(true)
+                }
+                _ => Err(format!("invalid Rules-Requires-Root value: {}", s)),
             })
     }
 
@@ -2021,6 +2038,35 @@ Build-Depends: foo, bar (>= 1.0.0)
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_provides(Some(&relations));
         assert!(binary.provides().is_some());
+    }
+
+    #[test]
+    fn test_try_rules_requires_root() {
+        let values: Vec<_> = [
+            "no",
+            "yes",
+            "binary-targets",
+            "dpkg/target-subcommand foo/bar",
+            "maybe",
+        ]
+        .iter()
+        .map(|v| {
+            let control: Control = format!("Source: foo\nRules-Requires-Root: {}\n", v)
+                .parse()
+                .unwrap();
+            control.source().unwrap().try_rules_requires_root()
+        })
+        .collect();
+        assert_eq!(
+            values,
+            vec![
+                Some(Ok(false)),
+                Some(Ok(true)),
+                Some(Ok(true)),
+                Some(Ok(true)),
+                Some(Err("invalid Rules-Requires-Root value: maybe".to_string()))
+            ]
+        );
     }
 
     #[test]
