@@ -135,8 +135,15 @@ impl Changes {
     }
 
     /// Returns the version of the source package.
+    ///
+    /// Panics if the version does not parse; see [`Self::try_version`].
     pub fn version(&self) -> Option<debversion::Version> {
-        self.0.get("Version").map(|s| s.parse().unwrap())
+        self.try_version().map(|r| r.unwrap())
+    }
+
+    /// Returns the version of the source package, or an error if it does not parse.
+    pub fn try_version(&self) -> Option<Result<debversion::Version, debversion::ParseError>> {
+        self.0.get("Version").map(|s| s.parse())
     }
 
     /// Returns the distribution the source package is intended for.
@@ -145,8 +152,15 @@ impl Changes {
     }
 
     /// Returns the urgency of the source package.
+    ///
+    /// Panics if the urgency does not parse; see [`Self::try_urgency`].
     pub fn urgency(&self) -> Option<crate::fields::Urgency> {
-        self.0.get("Urgency").map(|s| s.parse().unwrap())
+        self.try_urgency().map(|r| r.unwrap())
+    }
+
+    /// Returns the urgency of the source package, or an error if it does not parse.
+    pub fn try_urgency(&self) -> Option<Result<crate::fields::Urgency, String>> {
+        self.0.get("Urgency").map(|s| s.parse())
     }
 
     /// Returns the name and email address of the person who maintains the package.
@@ -165,24 +179,49 @@ impl Changes {
     }
 
     /// Returns the SHA-1 checksums of the files in the source package.
+    ///
+    /// Panics if a line does not parse; see [`Self::try_checksums_sha1`].
     pub fn checksums_sha1(&self) -> Option<Vec<crate::fields::Sha1Checksum>> {
+        self.try_checksums_sha1().map(|r| r.unwrap())
+    }
+
+    /// Returns the SHA-1 checksums, or an error if a line does not parse.
+    pub fn try_checksums_sha1(&self) -> Option<Result<Vec<crate::fields::Sha1Checksum>, String>> {
         self.0
             .get("Checksums-Sha1")
-            .map(|s| s.lines().map(|line| line.parse().unwrap()).collect())
+            .map(|s| s.lines().map(|line| line.parse()).collect())
     }
 
     /// Returns the SHA-256 checksums of the files in the source package.
+    ///
+    /// Panics if a line does not parse; see [`Self::try_checksums_sha256`].
     pub fn checksums_sha256(&self) -> Option<Vec<crate::fields::Sha256Checksum>> {
+        self.try_checksums_sha256().map(|r| r.unwrap())
+    }
+
+    /// Returns the SHA-256 checksums, or an error if a line does not parse.
+    pub fn try_checksums_sha256(
+        &self,
+    ) -> Option<Result<Vec<crate::fields::Sha256Checksum>, String>> {
         self.0
             .get("Checksums-Sha256")
-            .map(|s| s.lines().map(|line| line.parse().unwrap()).collect())
+            .map(|s| s.lines().map(|line| line.parse()).collect())
     }
 
     /// Returns the list of files in the source package.
+    ///
+    /// Panics if a line does not parse; see [`Self::try_files`].
     pub fn files(&self) -> Option<Vec<File>> {
-        self.0
-            .get("Files")
-            .map(|s| s.lines().map(|line| line.parse().unwrap()).collect())
+        self.try_files().map(|r| r.unwrap())
+    }
+
+    /// Returns the list of files, or an error if a line does not parse.
+    pub fn try_files(&self) -> Option<Result<Vec<File>, String>> {
+        self.0.get("Files").map(|s| {
+            s.lines()
+                .map(|line| line.parse().map_err(|()| format!("Invalid file: {}", line)))
+                .collect()
+        })
     }
 
     /// Returns the path to the pool directory for the source package.
@@ -424,6 +463,37 @@ Files:
         assert_eq!(
             changes.get_pool_path(),
             Some("pool/main/b/buildlog-consultant".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_malformed_fields() {
+        let changes = super::Changes::read(
+            "Source: foo\nVersion:\nUrgency: soon\nChecksums-Sha1:\n abc\nChecksums-Sha256:\n def\nFiles:\n 0123 notasize libs optional foo.dsc\n"
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            changes.try_version().map(|r| r.map_err(|e| e.to_string())),
+            Some(Err("Invalid version string: ".to_string()))
+        );
+        assert_eq!(
+            changes.try_urgency(),
+            Some(Err("invalid urgency: soon".to_string()))
+        );
+        assert_eq!(
+            changes.try_checksums_sha1(),
+            Some(Err("Missing size".to_string()))
+        );
+        assert_eq!(
+            changes.try_checksums_sha256(),
+            Some(Err("Missing size".to_string()))
+        );
+        assert_eq!(
+            changes.try_files(),
+            Some(Err(
+                "Invalid file: 0123 notasize libs optional foo.dsc".to_string()
+            ))
         );
     }
 }
