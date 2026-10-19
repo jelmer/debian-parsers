@@ -1511,8 +1511,15 @@ impl Binary {
     }
 
     /// The Multi-Arch field
+    ///
+    /// Panics if the value is not known; see [`Self::try_multi_arch`].
     pub fn multi_arch(&self) -> Option<MultiArch> {
-        self.paragraph.get("Multi-Arch").map(|s| s.parse().unwrap())
+        self.try_multi_arch().map(|r| r.unwrap())
+    }
+
+    /// The Multi-Arch field, or an error if the value is not known
+    pub fn try_multi_arch(&self) -> Option<Result<MultiArch, String>> {
+        self.paragraph.get("Multi-Arch").map(|s| s.parse())
     }
 
     /// Set the Multi-Arch field
@@ -1640,6 +1647,17 @@ Uploaders: Bob <bob@example.org>,
         assert_eq!(u[1].email, "carol@example.org");
         assert_eq!(&text[u[0].email_range], "bob@example.org");
         assert_eq!(&text[u[1].email_range], "carol@example.org");
+    }
+
+    #[test]
+    fn test_try_multi_arch_unknown_value() {
+        let control: Control = "Source: foo\n\nPackage: foo\nMulti-Arch: sometimes\n"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            control.binaries().next().unwrap().try_multi_arch(),
+            Some(Err("Invalid multiarch: sometimes".to_string()))
+        );
     }
 
     #[test]
