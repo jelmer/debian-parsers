@@ -1047,14 +1047,18 @@ impl Source {
     }
 
     /// Return the Rules-Requires-Root field
+    ///
+    /// Panics if the value is not valid; see [`Self::try_rules_requires_root`].
     pub fn rules_requires_root(&self) -> Option<bool> {
-        self.paragraph
-            .get("Rules-Requires-Root")
-            .map(|s| match s.to_lowercase().as_str() {
-                "yes" => true,
-                "no" => false,
-                _ => panic!("invalid Rules-Requires-Root value"),
-            })
+        self.try_rules_requires_root()
+            .map(|r| r.unwrap() != crate::fields::RulesRequiresRoot::No)
+    }
+
+    /// Return the Rules-Requires-Root field, or an error if the value is not valid
+    pub fn try_rules_requires_root(
+        &self,
+    ) -> Option<Result<crate::fields::RulesRequiresRoot, String>> {
+        self.paragraph.get("Rules-Requires-Root").map(|s| s.parse())
     }
 
     /// Set the Rules-Requires-Root field
@@ -2039,6 +2043,39 @@ Build-Depends: foo, bar (>= 1.0.0)
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_provides(Some(&relations));
         assert!(binary.provides().is_some());
+    }
+
+    #[test]
+    fn test_try_rules_requires_root() {
+        use crate::fields::RulesRequiresRoot;
+        let values: Vec<_> = [
+            "no",
+            "Yes",
+            "binary-targets",
+            "dpkg/target-subcommand Foo/Bar",
+            "maybe",
+        ]
+        .iter()
+        .map(|v| {
+            let control: Control = format!("Source: foo\nRules-Requires-Root: {}\n", v)
+                .parse()
+                .unwrap();
+            control.source().unwrap().try_rules_requires_root()
+        })
+        .collect();
+        assert_eq!(
+            values,
+            vec![
+                Some(Ok(RulesRequiresRoot::No)),
+                Some(Ok(RulesRequiresRoot::Yes)),
+                Some(Ok(RulesRequiresRoot::BinaryTargets)),
+                Some(Ok(RulesRequiresRoot::Keywords(vec![
+                    "dpkg/target-subcommand".to_string(),
+                    "Foo/Bar".to_string()
+                ]))),
+                Some(Err("invalid Rules-Requires-Root value: maybe".to_string()))
+            ]
+        );
     }
 
     #[test]
