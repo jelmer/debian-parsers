@@ -2595,7 +2595,14 @@ impl Relation {
     ///
     /// Returns `None` if the version contains a substvar, since it can not be
     /// represented as a [`Version`]; see [`Self::has_substvar_version`].
+    ///
+    /// Panics if the constraint or version does not parse; see [`Self::try_version`].
     pub fn version(&self) -> Option<(VersionConstraint, Version)> {
+        self.try_version().map(|r| r.unwrap())
+    }
+
+    /// Like [`Self::version`], but returns an error if the constraint or version does not parse.
+    pub fn try_version(&self) -> Option<Result<(VersionConstraint, Version), String>> {
         if self.has_substvar_version() {
             return None;
         }
@@ -2616,8 +2623,12 @@ impl Relation {
 
         if let Some(constraint) = constraint {
             if !version_str.is_empty() {
-                let vc: VersionConstraint = constraint.to_string().parse().unwrap();
-                Some((vc, version_str.parse().unwrap()))
+                Some(constraint.to_string().parse().and_then(|vc| {
+                    version_str
+                        .parse()
+                        .map(|version| (vc, version))
+                        .map_err(|e: debversion::ParseError| e.to_string())
+                }))
             } else {
                 None
             }
@@ -4112,6 +4123,16 @@ mod tests {
 
         let rel = parse_substvar_relation("foo (>= 1:2.0)");
         assert!(!rel.has_substvar_version());
+    }
+
+    #[test]
+    fn test_try_version_malformed() {
+        let (relations, _) = Relations::parse_relaxed("foo (=> 1.0)", false);
+        let relation = relations.get_entry(0).unwrap().get_relation(0).unwrap();
+        assert_eq!(
+            relation.try_version(),
+            Some(Err("Invalid version constraint: =>".to_string()))
+        );
     }
 
     #[test]
