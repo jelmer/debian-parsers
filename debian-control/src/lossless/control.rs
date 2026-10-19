@@ -1047,14 +1047,22 @@ impl Source {
     }
 
     /// Return the Rules-Requires-Root field
+    ///
+    /// Panics if the value is not valid. See [`Self::try_rules_requires_root`].
     pub fn rules_requires_root(&self) -> Option<bool> {
+        self.try_rules_requires_root()
+            .unwrap()
+            .map(|r| r != crate::fields::RulesRequiresRoot::No)
+    }
+
+    /// Return the Rules-Requires-Root field, or an error if the value is not valid
+    pub fn try_rules_requires_root(
+        &self,
+    ) -> Result<Option<crate::fields::RulesRequiresRoot>, String> {
         self.paragraph
             .get("Rules-Requires-Root")
-            .map(|s| match s.to_lowercase().as_str() {
-                "yes" => true,
-                "no" => false,
-                _ => panic!("invalid Rules-Requires-Root value"),
-            })
+            .map(|s| s.parse())
+            .transpose()
     }
 
     /// Set the Rules-Requires-Root field
@@ -2039,6 +2047,24 @@ Build-Depends: foo, bar (>= 1.0.0)
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_provides(Some(&relations));
         assert!(binary.provides().is_some());
+    }
+
+    #[test]
+    fn test_try_rules_requires_root() {
+        use crate::fields::RulesRequiresRoot;
+        let rrr = |paragraph: &str| {
+            let control: Control = paragraph.parse().unwrap();
+            control.source().unwrap().try_rules_requires_root()
+        };
+        assert_eq!(rrr("Source: foo\n"), Ok(None));
+        assert_eq!(
+            rrr("Source: foo\nRules-Requires-Root: binary-targets\n"),
+            Ok(Some(RulesRequiresRoot::BinaryTargets))
+        );
+        assert_eq!(
+            rrr("Source: foo\nRules-Requires-Root: maybe\n"),
+            Err("invalid Rules-Requires-Root value: maybe".to_string())
+        );
     }
 
     #[test]
