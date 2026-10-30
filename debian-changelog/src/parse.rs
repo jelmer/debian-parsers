@@ -2215,6 +2215,18 @@ impl Entry {
         self.0.kind() == OLD_ENTRY
     }
 
+    /// Returns the syntax errors found inside this entry.
+    pub fn errors(&self) -> Vec<String> {
+        self.0
+            .descendants()
+            .filter(|n| n.kind() == ERROR)
+            .map(|n| {
+                let line = line_col_at_offset(&n, n.text_range().start()).0;
+                format!("syntax error at line {}: {:?}", line + 1, n.text())
+            })
+            .collect()
+    }
+
     /// Returns the header AST node of the entry.
     pub fn header(&self) -> Option<EntryHeader> {
         self.0.children().find_map(EntryHeader::cast)
@@ -3207,6 +3219,30 @@ lintian-brush (0.35) UNRELEASED; urgency=medium
         assert_eq!(
             entry.datetime(),
             Some("2019-10-04T02:36:13+00:00".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn test_entry_errors() {
+        let parsed = ChangeLog::parse(
+            r#"foo (1.1-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Joe Example <joe@example.com>  Tue, 02 Jan 2024 00:00:00 +0000
+
+bar (1.0-1) unstable; urgency=low (HIGH for new source format)
+
+  * Initial release.
+
+ -- Joe Example <joe@example.com>  Mon, 01 Jan 2024 00:00:00 +0000
+"#,
+        );
+        let entries: Vec<_> = parsed.tree().iter().collect();
+        assert_eq!(entries[0].errors(), Vec::<String>::new());
+        assert_eq!(
+            entries[1].errors(),
+            vec![r#"syntax error at line 7: "(HIGH for new source format)""#]
         );
     }
 
