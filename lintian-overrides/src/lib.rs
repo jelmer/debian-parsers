@@ -914,12 +914,12 @@ fn lex_package_spec(line: &str) -> SpecScan<'_> {
             .find(|c: char| c.is_whitespace() || c == '[' || c == ':')
             .unwrap_or(rest.len());
         let word = &rest[..end];
-        let after = rest[end..].trim_start();
         if word.is_empty() {
             return SpecScan::None;
         }
-        if PACKAGE_TYPES.contains(&word) && after.starts_with(':') {
+        if PACKAGE_TYPES.contains(&word) && rest[end..].trim_start().starts_with(':') {
             tokens.push((PACKAGE_TYPE, word));
+            let after = push_ws(&mut tokens, &rest[end..]);
             return finish_spec(tokens, after);
         }
         tokens.push((PACKAGE_NAME, word));
@@ -1822,6 +1822,14 @@ mod tests {
             "foo [amd64] binary: some-tag\n",
             "[linux-any]: some-tag\n",
         ] {
+            let parsed = LintianOverrides::parse(input).tree();
+            assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
+        }
+    }
+
+    #[test]
+    fn test_parse_bare_type_with_space_before_colon_roundtrip() {
+        for input in ["udeb : some-tag\n", "J\n\nudeb\r:"] {
             let parsed = LintianOverrides::parse(input).tree();
             assert_eq!(parsed.text(), input, "round-trip differs for {:?}", input);
         }
