@@ -80,7 +80,7 @@ fn lex_(mut input: &str, mut start_of_line: bool) -> impl Iterator<Item = (Synta
                         Some((SyntaxKind::WHITESPACE, whitespace))
                     }
                 }
-                '#' if start_of_line => {
+                '#' if start_of_line && indent == 0 => {
                     let (comment, remaining) =
                         input.split_at(input.find(common::is_newline).unwrap_or(input.len()));
                     input = remaining;
@@ -391,6 +391,26 @@ Section: vcs
                 (INDENT, " "),
                 (VALUE, "bar"),
                 (NEWLINE, "\r"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_hash_in_continuation_line_is_not_a_comment() {
+        assert_eq!(
+            super::lex("License: X\n # a\n .\n").collect::<Vec<_>>(),
+            vec![
+                (KEY, "License"),
+                (COLON, ":"),
+                (WHITESPACE, " "),
+                (VALUE, "X"),
+                (NEWLINE, "\n"),
+                (INDENT, " "),
+                (VALUE, "# a"),
+                (NEWLINE, "\n"),
+                (INDENT, " "),
+                (VALUE, "."),
+                (NEWLINE, "\n"),
             ]
         );
     }

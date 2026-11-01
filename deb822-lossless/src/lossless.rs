@@ -5913,3 +5913,16 @@ fn test_crlf_roundtrip_with_edit() {
         "Source: foo\r\nSection: net\r\nPriority: optional\n"
     );
 }
+
+#[test]
+fn test_hash_in_continuation_line_parses_without_errors() {
+    let text = "License: BlueOak-1.0.0\n # Blue Oak Model License\n .\n Version 1.0.0\n";
+    let parsed = Deb822::parse(text);
+    assert_eq!(parsed.positioned_errors(), &[]);
+    let deb822 = parsed.tree();
+    let paragraph = deb822.paragraphs().next().unwrap();
+    assert_eq!(
+        paragraph.get("License").as_deref(),
+        Some("BlueOak-1.0.0\n# Blue Oak Model License\n.\nVersion 1.0.0")
+    );
+}
