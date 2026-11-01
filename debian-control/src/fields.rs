@@ -446,6 +446,55 @@ impl std::fmt::Display for MultiArch {
     }
 }
 
+/// Value of the Rules-Requires-Root field
+#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+pub enum RulesRequiresRoot {
+    /// The build needs no root.
+    No,
+    /// `yes`, as written by `Source::set_rules_requires_root`; not a value Policy defines.
+    Yes,
+    /// The binary targets need root.
+    BinaryTargets,
+    /// The `<namespace>/<case>` keywords that need root.
+    Keywords(Vec<String>),
+}
+
+impl std::str::FromStr for RulesRequiresRoot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "no" => Ok(RulesRequiresRoot::No),
+            "yes" => Ok(RulesRequiresRoot::Yes),
+            "binary-targets" => Ok(RulesRequiresRoot::BinaryTargets),
+            _ => {
+                let keywords: Vec<String> = s.split_whitespace().map(String::from).collect();
+                if !keywords.is_empty()
+                    && keywords.iter().all(|k| {
+                        k.split_once('/')
+                            .is_some_and(|(ns, case)| !ns.is_empty() && !case.is_empty())
+                    })
+                {
+                    Ok(RulesRequiresRoot::Keywords(keywords))
+                } else {
+                    Err(format!("invalid Rules-Requires-Root value: {}", s))
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for RulesRequiresRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            RulesRequiresRoot::No => f.write_str("no"),
+            RulesRequiresRoot::Yes => f.write_str("yes"),
+            RulesRequiresRoot::BinaryTargets => f.write_str("binary-targets"),
+            RulesRequiresRoot::Keywords(keywords) => f.write_str(&keywords.join(" ")),
+        }
+    }
+}
+
 /// Format a Debian package description according to Debian policy.
 ///
 /// Package descriptions consist of a short description (synopsis) and a long description.
