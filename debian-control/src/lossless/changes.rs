@@ -238,11 +238,7 @@ impl Changes {
 
         let source = self.source()?;
 
-        let subdir = if source.starts_with("lib") {
-            "lib".to_string()
-        } else {
-            source[..1].to_lowercase()
-        };
+        let subdir = pool_subdir(&source);
 
         Some(format!("pool/{}/{}/{}", section, subdir, source))
     }
@@ -312,6 +308,19 @@ impl Changes {
             errors.push("multiple paragraphs found".to_string());
         }
         Ok((Self(para), errors))
+    }
+}
+
+/// Subdirectory of the pool used for a source package, e.g. `pool/main/libf` for `libfoo`.
+///
+/// An exact copy of `get_pool_path()` in python-debian: the first four characters for
+/// sources starting with `lib`, the first character otherwise. The source name is
+/// expected to be ASCII, which is what makes slicing it by byte safe.
+fn pool_subdir(source: &str) -> String {
+    if source.starts_with("lib") {
+        source[..source.len().min(4)].to_lowercase()
+    } else {
+        source[..1].to_lowercase()
     }
 }
 
@@ -495,5 +504,26 @@ Files:
                 "Invalid file: 0123 notasize libs optional foo.dsc".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn test_pool_subdir() {
+        // A name shorter than four characters is used whole, so the clamping min(4)
+        // is what keeps "libx" and "lib" from slicing past the end.
+        for (source, expected) in [
+            ("libreoffice", "libr"),
+            ("libsigc++-2.0", "libs"),
+            ("libfoo", "libf"),
+            ("libx", "libx"),
+            ("lib", "lib"),
+            ("foo", "f"),
+            ("F", "f"),
+            ("7zip", "7"),
+            // The "lib" test is case sensitive, as it is in python-debian, so a
+            // capitalised name is bucketed by its first letter alone.
+            ("Liberation", "l"),
+        ] {
+            assert_eq!(super::pool_subdir(source), expected, "source {}", source);
+        }
     }
 }
