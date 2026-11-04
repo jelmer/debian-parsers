@@ -82,6 +82,28 @@ impl std::str::FromStr for File {
     }
 }
 
+/// Compute the archive pool path for a source package.
+///
+/// The `section` is expected to be of the form `area/subsection`
+/// (e.g. `contrib/python`), where only the leading area is used; a bare
+/// section with no slash is treated as being in `main`.
+/// Source names starting with `lib` are grouped under the first four characters (e.g. `libfoo`
+/// under `libf`).
+pub fn pool_path(source: &str, section: &str) -> String {
+    let area = match section.split_once('/') {
+        Some((area, _)) => area,
+        None => "main",
+    };
+
+    let subdir = if source.starts_with("lib") {
+        &source[..4]
+    } else {
+        &source[..1]
+    };
+
+    format!("pool/{}/{}/{}", area, subdir, source)
+}
+
 impl Changes {
     /// Parse changes text, returning a Parse result
     ///
@@ -227,24 +249,9 @@ impl Changes {
     /// Returns the path to the pool directory for the source package.
     pub fn get_pool_path(&self) -> Option<String> {
         let files = self.files()?;
-
-        let section = &files.first().unwrap().section;
-
-        let section = if let Some((section, _subsection)) = section.split_once('/') {
-            section
-        } else {
-            "main"
-        };
-
+        let section = &files.first()?.section;
         let source = self.source()?;
-
-        let subdir = if source.starts_with("lib") {
-            "lib".to_string()
-        } else {
-            source[..1].to_lowercase()
-        };
-
-        Some(format!("pool/{}/{}/{}", section, subdir, source))
+        Some(pool_path(&source, section))
     }
 
     /// Create a new Changes file.
@@ -495,5 +502,23 @@ Files:
                 "Invalid file: 0123 notasize libs optional foo.dsc".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn test_pool_path() {
+        let cases = [
+            ("hello", "main/misc", "pool/main/h/hello"),
+            ("libfoo", "main/libs", "pool/main/libf/libfoo"),
+            ("zsh", "contrib/shells", "pool/contrib/z/zsh"),
+            ("hello", "python", "pool/main/h/hello"),
+            (
+                "nvidia-driver",
+                "non-free/libs",
+                "pool/non-free/n/nvidia-driver",
+            ),
+        ];
+        for (source, section, expected) in cases {
+            assert_eq!(super::pool_path(source, section), expected);
+        }
     }
 }
