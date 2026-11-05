@@ -128,6 +128,12 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+impl From<Vec<String>> for ParseError {
+    fn from(errors: Vec<String>) -> Self {
+        ParseError(errors)
+    }
+}
+
 impl From<ParseError> for Error {
     fn from(e: ParseError) -> Self {
         Error::Parse(e)
@@ -3244,6 +3250,15 @@ bar (1.0-1) unstable; urgency=low (HIGH for new source format)
             entries[1].errors(),
             vec![r#"syntax error at line 7: "(HIGH for new source format)""#]
         );
+    }
+
+    #[test]
+    fn test_parse_error_from_vec() {
+        let e = ParseError::from(vec!["invalid urgency: foo".to_string()]);
+        assert_eq!(Err(e), "foo".parse::<Urgency>());
+
+        let e = ParseError::from(vec!["first".to_string(), "second".to_string()]);
+        assert_eq!(e.to_string(), "first\nsecond\n");
     }
 
     #[cfg(test)]
