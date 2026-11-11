@@ -34,12 +34,19 @@
 //! assert_eq!(license.name(), Some("GPL-3+"));
 //! ```
 //!
-//! See the ``lossless`` module (behind the ``lossless`` feature) for a more forgiving parser that
+//! See the ``edit`` module (behind the ``edit`` feature) for a more forgiving parser that
 //! allows partial parsing, parsing files with errors and unknown fields and editing while
 //! preserving formatting.
 
+#[cfg(feature = "edit")]
+pub mod edit;
+
 #[cfg(feature = "lossless")]
-pub mod lossless;
+#[deprecated(since = "0.1.28", note = "Use `edit` module instead")]
+pub mod lossless {
+    //! Deprecated: Use the `edit` module instead.
+    pub use crate::edit::*;
+}
 pub mod lossy;
 pub use lossy::Copyright;
 

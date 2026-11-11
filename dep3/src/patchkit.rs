@@ -31,14 +31,14 @@ use patchkit::unified::{parse_patches, PlainOrBinaryPatch};
 pub enum Error {
     /// The DEP-3 header could not be parsed as a deb822 paragraph.
     #[cfg(feature = "lossless")]
-    Header(deb822_lossless::ParseError),
+    Header(deb822_edit::ParseError),
     /// The unified diff body could not be parsed.
     Diff(patchkit::unified::Error),
 }
 
 #[cfg(feature = "lossless")]
-impl From<deb822_lossless::ParseError> for Error {
-    fn from(e: deb822_lossless::ParseError) -> Self {
+impl From<deb822_edit::ParseError> for Error {
+    fn from(e: deb822_edit::ParseError) -> Self {
         Error::Header(e)
     }
 }

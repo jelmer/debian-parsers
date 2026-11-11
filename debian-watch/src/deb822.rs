@@ -1,7 +1,7 @@
 //! Watch file implementation for format 5 (RFC822/deb822 style)
 use crate::types::ParseError as TypesParseError;
 use crate::VersionPolicy;
-use deb822_lossless::{Deb822, Paragraph};
+use deb822_edit::{Deb822, Paragraph};
 use std::str::FromStr;
 
 /// Get the deb822 field name for a WatchOption variant
@@ -237,7 +237,7 @@ impl Entry {
         }
 
         // If not found, try with different case variations in the entry
-        // deb822-lossless is case-preserving, so we need to check all field names
+        // deb822-edit is case-preserving, so we need to check all field names
         let normalized_key = normalize_key(key);
 
         // Iterate through all keys in the paragraph and check for normalized match

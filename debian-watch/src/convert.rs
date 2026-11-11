@@ -2,7 +2,7 @@
 
 use crate::linebased::{Entry, WatchFile};
 use crate::SyntaxKind::*;
-use deb822_lossless::{Deb822, Paragraph};
+use deb822_edit::{Deb822, Paragraph};
 
 /// Error type for conversion failures
 #[derive(Debug)]
@@ -41,8 +41,7 @@ pub fn convert_to_v5(watch_file: &WatchFile) -> Result<crate::deb822::WatchFile,
 
     // Convert each entry to a paragraph
     for _entry in watch_file.entries() {
-        let para: deb822_lossless::Paragraph =
-            vec![("Source", "placeholder")].into_iter().collect();
+        let para: deb822_edit::Paragraph = vec![("Source", "placeholder")].into_iter().collect();
         paragraphs.push(para);
     }
 

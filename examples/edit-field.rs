@@ -1,5 +1,5 @@
 fn main() {
-    let d: deb822_lossless::Deb822 = r#"Source: golang-github-blah-blah
+    let d: deb822_edit::Deb822 = r#"Source: golang-github-blah-blah
 Section: devel
 Priority: optional
 Standards-Version: 4.2.0
