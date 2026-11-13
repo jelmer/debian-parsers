@@ -2543,8 +2543,22 @@ impl Entry {
 
         if let Some(last_child) = last_child {
             let text = EntryBody::cast(last_child.clone()).map(|body| body.text());
-            self.0
-                .splice_children(last_child.index()..last_child.index() + 1, vec![]);
+            let mut prev = last_child
+                .prev_sibling_or_token()
+                .and_then(|p| p.into_node());
+            last_child.detach();
+            // Blank lines that only separated it from earlier changes go with it.
+            while let Some(line) = prev {
+                if line.kind() != EMPTY_LINE
+                    || !line
+                        .siblings(rowan::Direction::Prev)
+                        .any(|s| s.kind() == ENTRY_BODY)
+                {
+                    break;
+                }
+                prev = line.prev_sibling_or_token().and_then(|p| p.into_node());
+                line.detach();
+            }
             text
         } else {
             None
@@ -3701,6 +3715,51 @@ bar (1.0-1) unstable; urgency=low (HIGH for new source format)
 
         // Test popping from empty entry
         assert_eq!(entry.pop_change_line(), None);
+    }
+
+    #[test]
+    fn test_pop_and_append_change_lines() {
+        let text = r#"breezy (3.3.4-1) unstable; urgency=low
+
+  [ Alice Example ]
+  * New upstream release.
+
+  [ Bob Example ]
+  * Fixed bug #123.
+
+ -- Alice Example <alice@example.com>  Mon, 04 Sep 2023 18:13:45 -0500
+"#;
+        let entry: Entry = text.parse().unwrap();
+        let lines: Vec<String> = entry.change_lines().collect();
+
+        entry.pop_change_line();
+        entry.pop_change_line();
+        assert_eq!(
+            entry.to_string(),
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+  [ Alice Example ]
+  * New upstream release.
+
+ -- Alice Example <alice@example.com>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+        );
+
+        entry.pop_change_line();
+        entry.pop_change_line();
+        assert_eq!(
+            entry.to_string(),
+            r#"breezy (3.3.4-1) unstable; urgency=low
+
+
+ -- Alice Example <alice@example.com>  Mon, 04 Sep 2023 18:13:45 -0500
+"#
+        );
+
+        for line in &lines {
+            entry.append_change_line(line);
+        }
+        assert_eq!(entry.to_string(), text);
     }
 
     #[test]
