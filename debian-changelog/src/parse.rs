@@ -2550,8 +2550,19 @@ impl Entry {
                 }
                 None
             });
-            self.0
-                .splice_children(last_child.index()..last_child.index() + 1, vec![]);
+            // Blank lines that only separated it from earlier changes go with it.
+            let siblings: Vec<_> = self.0.children_with_tokens().collect();
+            let end = last_child.index();
+            let mut start = end;
+            while start > 0
+                && siblings[start - 1].kind() == EMPTY_LINE
+                && siblings[..start - 1].iter().any(|s| s.kind() == ENTRY_BODY)
+            {
+                start -= 1;
+            }
+            for i in (start..=end).rev() {
+                self.0.splice_children(i..i + 1, vec![]);
+            }
             text
         } else {
             None
@@ -3708,6 +3719,37 @@ bar (1.0-1) unstable; urgency=low (HIGH for new source format)
 
         // Test popping from empty entry
         assert_eq!(entry.pop_change_line(), None);
+
+        // Popping every line and appending them again keeps the entry as it was
+        let text = r#"breezy (3.3.4-1) unstable; urgency=low
+
+  [ Alice Example ]
+  * New upstream release.
+
+  [ Bob Example ]
+  * Fixed bug #123.
+
+ -- Alice Example <alice@example.com>  Mon, 04 Sep 2023 18:13:45 -0500
+"#;
+        let entry: Entry = text.parse().unwrap();
+        let lines: Vec<String> = entry.change_lines().collect();
+        let mut popped = vec![];
+        while let Some(line) = entry.pop_change_line() {
+            popped.push(line);
+        }
+        assert_eq!(
+            popped,
+            [
+                "* Fixed bug #123.",
+                "[ Bob Example ]",
+                "* New upstream release.",
+                "[ Alice Example ]"
+            ]
+        );
+        for line in &lines {
+            entry.append_change_line(line);
+        }
+        assert_eq!(entry.to_string(), text);
     }
 
     #[test]
