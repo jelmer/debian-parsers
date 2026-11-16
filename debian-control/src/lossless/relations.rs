@@ -2048,7 +2048,7 @@ impl Entry {
             .0
             .siblings(Direction::Prev)
             .skip(1)
-            .any(|n| n.kind() == ENTRY);
+            .any(|n| n.kind() == ENTRY || n.kind() == SUBSTVAR);
         while let Some(n) = self.0.next_sibling_or_token() {
             if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                 n.detach();
@@ -5610,6 +5610,21 @@ Description: test
         assert_eq!(
             relations.entries().next().unwrap().to_string(),
             "python3-all-dev"
+        );
+    }
+
+    #[test]
+    fn test_remove_entry_after_substvar() {
+        let (mut relations, _) = Relations::parse_relaxed("${misc:Depends}, libc6", true);
+        relations.remove_entry(0);
+        assert_eq!(relations.to_string(), "${misc:Depends}");
+
+        let input = "${misc:Depends}, libc6,\n# Terminal first\nxterm";
+        let (mut relations, _) = Relations::parse_relaxed(input, true);
+        relations.remove_entry(0);
+        assert_eq!(
+            relations.to_string(),
+            "${misc:Depends},\n# Terminal first\nxterm"
         );
     }
 
