@@ -1974,6 +1974,12 @@ Architecture: amd64
             control.to_string(),
             "Package: foo\nDepends: libc6,\n# Terminal first\n xterm,\n openbox\n"
         );
+        depends.remove_entry(0);
+        binary.set_depends(Some(&depends));
+        assert_eq!(
+            control.to_string(),
+            "Package: foo\nDepends:\n# Terminal first\n xterm,\n openbox\n"
+        );
     }
 
     #[test]

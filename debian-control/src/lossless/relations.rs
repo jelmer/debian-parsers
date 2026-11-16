@@ -2072,8 +2072,9 @@ impl Entry {
                 }
             }
         } else {
+            // The comment lines above the next entry stay
             while let Some(n) = self.0.next_sibling_or_token() {
-                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
+                if matches!(n.kind(), WHITESPACE | NEWLINE) {
                     n.detach();
                 } else {
                     break;
@@ -5611,6 +5612,7 @@ Description: test
             relations.entries().next().unwrap().to_string(),
             "python3-all-dev"
         );
+        assert_eq!(relations.to_string(), "#  commented-out,\npython3-all-dev");
     }
 
     #[test]
@@ -5649,6 +5651,8 @@ Description: test
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].to_string(), "dh-python");
         assert_eq!(entries[1].to_string(), "libfoo-dev");
+        // The comment line right above the dropped entry goes with it
+        assert_eq!(relations.to_string(), "dh-python,\nlibfoo-dev");
     }
 
     #[test]
