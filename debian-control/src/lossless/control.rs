@@ -962,8 +962,16 @@ impl Source {
 
     /// Set a field in the source paragraph, using canonical field ordering for source packages
     pub fn set(&mut self, key: &str, value: &str) {
-        self.paragraph
-            .set_with_field_order(key, value, SOURCE_FIELD_ORDER);
+        if crate::fields::SOURCE_RELATION_FIELDS
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(key))
+        {
+            self.paragraph
+                .set_with_comments(key, value, Some(SOURCE_FIELD_ORDER));
+        } else {
+            self.paragraph
+                .set_with_field_order(key, value, SOURCE_FIELD_ORDER);
+        }
     }
 
     /// Retrieve a field
@@ -1587,8 +1595,17 @@ impl Binary {
 
     /// Set a field in the binary paragraph, using canonical field ordering for binary packages
     pub fn set(&mut self, key: &str, value: &str) {
-        self.paragraph
-            .set_with_field_order(key, value, BINARY_FIELD_ORDER);
+        if crate::fields::BINARY_RELATION_FIELDS
+            .iter()
+            .chain(&["Built-Using", "Static-Built-Using"])
+            .any(|f| f.eq_ignore_ascii_case(key))
+        {
+            self.paragraph
+                .set_with_comments(key, value, Some(BINARY_FIELD_ORDER));
+        } else {
+            self.paragraph
+                .set_with_field_order(key, value, BINARY_FIELD_ORDER);
+        }
     }
 
     /// Retrieve a field
@@ -1961,6 +1978,19 @@ Architecture: amd64
         let mut binary = control.add_binary("foo");
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_depends(Some(&relations));
+
+        let control: Control =
+            "Package: foo\nDepends: libc6,\n# Terminal first\n xterm,\n openbox,\n xterm\n"
+                .parse()
+                .unwrap();
+        let mut binary = control.binaries().next().unwrap();
+        let mut depends = binary.depends().unwrap();
+        depends.remove_entry(3);
+        binary.set_depends(Some(&depends));
+        assert_eq!(
+            control.to_string(),
+            "Package: foo\nDepends: libc6,\n# Terminal first\n xterm,\n openbox\n"
+        );
     }
 
     #[test]

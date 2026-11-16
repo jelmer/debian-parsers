@@ -2001,6 +2001,17 @@ impl Paragraph {
             .expect("Invalid value: empty continuation line")
     }
 
+    /// Set a field like [`set()`](Self::set), but write the lines of `value` that
+    /// start with `#` as comment lines, the way [`get_with_comments()`](Self::get_with_comments)
+    /// returns them. A new field is placed by `field_order`, or at the end if None.
+    ///
+    /// # Panics
+    /// Panics if the value contains empty continuation lines (lines with only whitespace)
+    pub fn set_with_comments(&mut self, key: &str, value: &str, field_order: Option<&[&str]>) {
+        self.try_set_entry(key, value, None, field_order, true)
+            .expect("Invalid value: empty continuation line")
+    }
+
     /// Set a field using a specific field ordering
     pub fn set_with_field_order(&mut self, key: &str, value: &str, field_order: &[&str]) {
         self.try_set_with_indent_pattern(key, value, None, Some(field_order))
@@ -2029,6 +2040,17 @@ impl Paragraph {
         value: &str,
         default_indent_pattern: Option<&IndentPattern>,
         field_order: Option<&[&str]>,
+    ) -> Result<(), Error> {
+        self.try_set_entry(key, value, default_indent_pattern, field_order, false)
+    }
+
+    fn try_set_entry(
+        &mut self,
+        key: &str,
+        value: &str,
+        default_indent_pattern: Option<&IndentPattern>,
+        field_order: Option<&[&str]>,
+        comments: bool,
     ) -> Result<(), Error> {
         // Check if the field already exists and extract its formatting (case-insensitive)
         let existing_entry = self.entries().find(|entry| {
@@ -2062,7 +2084,7 @@ impl Paragraph {
             .and_then(|e| e.key())
             .unwrap_or_else(|| key.to_string());
 
-        let new_entry = Entry::try_with_formatting(&actual_key, value, &post_colon_ws, &indent)?;
+        let new_entry = Entry::try_build(&actual_key, value, &post_colon_ws, &indent, comments)?;
 
         // Check if the field already exists and replace it (case-insensitive)
         for entry in self.entries() {
@@ -2581,11 +2603,31 @@ impl Entry {
         post_colon_ws: &str,
         indent: &str,
     ) -> Result<Entry, Error> {
+        Self::try_build(key, value, post_colon_ws, indent, false)
+    }
+
+    fn try_build(
+        key: &str,
+        value: &str,
+        post_colon_ws: &str,
+        indent: &str,
+        comments: bool,
+    ) -> Result<Entry, Error> {
         let mut builder = GreenNodeBuilder::new();
 
         builder.start_node(ENTRY.into());
         builder.token(KEY.into(), key);
         builder.token(COLON.into(), ":");
+
+        // A leading comment line goes on the line after the key
+        let post_colon_ws = if comments && value.starts_with('#') {
+            "\n".to_string()
+        } else if comments && post_colon_ws.ends_with('\n') {
+            // The old value started with a comment line
+            format!("{post_colon_ws}{indent}")
+        } else {
+            post_colon_ws.to_string()
+        };
 
         // Add the post-colon whitespace token by token
         let mut i = 0;
@@ -2604,6 +2646,11 @@ impl Entry {
         }
 
         for (line_idx, line) in value.split('\n').enumerate() {
+            if comments && line.starts_with('#') {
+                builder.token(COMMENT.into(), line);
+                builder.token(NEWLINE.into(), "\n");
+                continue;
+            }
             if line_idx > 0 {
                 // Validate that continuation lines are not empty or whitespace-only
                 // According to Debian Policy, continuation lines must have content
@@ -5869,6 +5916,30 @@ Standards-Version: 4.7.0
     assert_eq!(para.get("Standards-Version").as_deref(), Some("4.7.0"));
     // Round-trip
     assert_eq!(deb822.to_string(), text);
+    // set_with_comments() writes them back as comment lines
+    let mut para = para;
+    let value = para.get_with_comments("Build-Depends").unwrap();
+    para.set_with_comments("Build-Depends", &value, None);
+    assert_eq!(deb822.to_string(), text);
+    // A leading comment line goes on the line after the key
+    para.set_with_comments(
+        "Build-Depends",
+        "# python3-all-dbg,\npython3-docutils",
+        None,
+    );
+    assert_eq!(
+        deb822.to_string(),
+        "Build-Depends:\n# python3-all-dbg,\n               python3-docutils\nStandards-Version: 4.7.0\n"
+    );
+    assert_eq!(
+        para.get("Build-Depends").as_deref(),
+        Some("python3-docutils")
+    );
+    para.set_with_comments("Build-Depends", "python3-docutils", None);
+    assert_eq!(
+        deb822.to_string(),
+        "Build-Depends:\n               python3-docutils\nStandards-Version: 4.7.0\n"
+    );
 }
 
 #[test]
