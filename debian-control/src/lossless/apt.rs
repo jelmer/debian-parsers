@@ -1130,6 +1130,48 @@ impl Release {
         self.0.set("Valid-Until", date.to_rfc2822().as_str());
     }
 
+    #[cfg(feature = "jiff")]
+    /// Get the date of the release, as a jiff timestamp
+    ///
+    /// Returns `None` if the field is absent or is not a valid RFC 2822 date.
+    pub fn date_jiff(&self) -> Option<jiff::Zoned> {
+        self.0
+            .get("Date")
+            .as_deref()
+            .and_then(|s| jiff::fmt::rfc2822::parse(s).ok())
+    }
+
+    #[cfg(feature = "jiff")]
+    /// Set the date of the release, from a jiff timestamp
+    ///
+    /// Returns an error if the year cannot be represented in RFC 2822.
+    pub fn set_date_jiff(&mut self, date: &jiff::Zoned) -> Result<(), jiff::Error> {
+        self.0
+            .set("Date", jiff::fmt::rfc2822::to_string(date)?.as_str());
+        Ok(())
+    }
+
+    #[cfg(feature = "jiff")]
+    /// Get the date until the release is valid, as a jiff timestamp
+    ///
+    /// Returns `None` if the field is absent or is not a valid RFC 2822 date.
+    pub fn valid_until_jiff(&self) -> Option<jiff::Zoned> {
+        self.0
+            .get("Valid-Until")
+            .as_deref()
+            .and_then(|s| jiff::fmt::rfc2822::parse(s).ok())
+    }
+
+    #[cfg(feature = "jiff")]
+    /// Set the date until the release is valid, from a jiff timestamp
+    ///
+    /// Returns an error if the year cannot be represented in RFC 2822.
+    pub fn set_valid_until_jiff(&mut self, date: &jiff::Zoned) -> Result<(), jiff::Error> {
+        self.0
+            .set("Valid-Until", jiff::fmt::rfc2822::to_string(date)?.as_str());
+        Ok(())
+    }
+
     /// Get whether acquire by hash is enabled
     pub fn acquire_by_hash(&self) -> bool {
         self.0
@@ -1665,6 +1707,36 @@ Suite: testing
         let mut release: super::Release = s.parse().unwrap();
         release.set_suite("unstable");
         assert_eq!(release.suite(), Some("unstable".to_string()));
+    }
+
+    #[test]
+    #[cfg(feature = "jiff")]
+    fn test_release_date_jiff() {
+        let s = "Origin: Debian\nDate: Sat, 10 Feb 2024 15:33:14 UTC\n";
+        let mut release: super::Release = s.parse().unwrap();
+        let date = release.date_jiff().unwrap();
+        assert_eq!(2024, date.year());
+        assert_eq!(2, date.month());
+        assert_eq!(10, date.day());
+
+        let valid_until = jiff::civil::date(2024, 2, 17)
+            .at(15, 33, 14, 0)
+            .in_tz("UTC")
+            .unwrap();
+        release.set_valid_until_jiff(&valid_until).unwrap();
+        assert_eq!(
+            "Origin: Debian\nDate: Sat, 10 Feb 2024 15:33:14 UTC\nValid-Until: Sat, 17 Feb 2024 15:33:14 +0000\n",
+            release.to_string()
+        );
+        assert_eq!(Some(valid_until), release.valid_until_jiff());
+    }
+
+    #[test]
+    #[cfg(feature = "jiff")]
+    fn test_release_date_jiff_malformed() {
+        let s = "Origin: Debian\nDate: not a date\n";
+        let release: super::Release = s.parse().unwrap();
+        assert_eq!(None, release.date_jiff());
     }
 
     #[test]
