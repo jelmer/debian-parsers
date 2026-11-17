@@ -2542,14 +2542,7 @@ impl Entry {
         let last_child = self.0.children().filter(|n| n.kind() == ENTRY_BODY).last();
 
         if let Some(last_child) = last_child {
-            let text = last_child.children_with_tokens().find_map(|it| {
-                if let Some(token) = it.as_token() {
-                    if token.kind() == DETAIL {
-                        return Some(token.text().to_string());
-                    }
-                }
-                None
-            });
+            let text = EntryBody::cast(last_child.clone()).map(|body| body.text());
             self.0
                 .splice_children(last_child.index()..last_child.index() + 1, vec![]);
             text
@@ -3735,7 +3728,7 @@ bar (1.0-1) unstable; urgency=low (HIGH for new source format)
 
         entry.pop_change_line();
         entry.append_change_line("");
-        // Empty lines don't have DETAIL tokens, so pop_change_line returns None
+        assert_eq!(entry.pop_change_line(), Some("".to_string()));
         assert_eq!(entry.pop_change_line(), None);
     }
 
