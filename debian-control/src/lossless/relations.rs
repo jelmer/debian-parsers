@@ -2060,15 +2060,52 @@ impl Entry {
                 panic!("Unexpected node: {:?}", n);
             }
         }
-        if !is_first {
-            while let Some(n) = self.0.prev_sibling_or_token() {
-                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
-                    n.detach();
-                } else if !removed_comma && n.kind() == COMMA {
-                    n.detach();
-                    break;
-                } else {
-                    break;
+        let comment_above = self
+            .0
+            .siblings_with_tokens(Direction::Prev)
+            .skip(1)
+            .take_while(|n| matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT))
+            .any(|n| n.kind() == COMMENT);
+        if !is_first && comment_above && removed_comma {
+            // The comment lines above this entry stay; drop the rest of its line instead
+            let mut own_line = false;
+            while let Some(n) = self.0.next_sibling_or_token() {
+                match n.kind() {
+                    WHITESPACE => n.detach(),
+                    NEWLINE => {
+                        n.detach();
+                        own_line = true;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            let next = self.0.next_sibling_or_token().map(|n| n.kind());
+            let at_end = next.is_none();
+            if own_line || at_end || next == Some(COMMENT) {
+                while let Some(n) = self.0.prev_sibling_or_token() {
+                    if n.kind() == WHITESPACE || (at_end && n.kind() == NEWLINE) {
+                        n.detach();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } else if !is_first {
+            // The comment lines above this entry stay
+            let mut seen_comment = false;
+            let mut prev = self.0.prev_sibling_or_token();
+            while let Some(n) = prev {
+                prev = n.prev_sibling_or_token();
+                match n.kind() {
+                    COMMENT => seen_comment = true,
+                    WHITESPACE | NEWLINE if seen_comment => {}
+                    WHITESPACE | NEWLINE => n.detach(),
+                    COMMA if !removed_comma => {
+                        n.detach();
+                        break;
+                    }
+                    _ => break,
                 }
             }
         } else {
@@ -5651,8 +5688,25 @@ Description: test
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].to_string(), "dh-python");
         assert_eq!(entries[1].to_string(), "libfoo-dev");
-        // The comment line right above the dropped entry goes with it
-        assert_eq!(relations.to_string(), "dh-python,\nlibfoo-dev");
+        assert_eq!(
+            relations.to_string(),
+            "dh-python,\n#  commented-out,\nlibfoo-dev"
+        );
+        assert!(relations.drop_dependency("libfoo-dev"));
+        assert_eq!(relations.to_string(), "dh-python\n#  commented-out,");
+
+        let input = "dh-python,\n#  commented-out,\n python3-all-dev, libfoo-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        assert!(relations.drop_dependency("python3-all-dev"));
+        assert_eq!(
+            relations.to_string(),
+            "dh-python,\n#  commented-out,\n libfoo-dev"
+        );
+
+        let input = "dh-python,\n#  commented-out,\n python3-all-dev,";
+        let mut relations: Relations = input.parse().unwrap();
+        assert!(relations.drop_dependency("python3-all-dev"));
+        assert_eq!(relations.to_string(), "dh-python,\n#  commented-out,");
     }
 
     #[test]
