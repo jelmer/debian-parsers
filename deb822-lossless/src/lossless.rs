@@ -2062,7 +2062,11 @@ impl Paragraph {
             .and_then(|e| e.key())
             .unwrap_or_else(|| key.to_string());
 
-        let new_entry = Entry::try_with_formatting(&actual_key, value, &post_colon_ws, &indent)?;
+        let comments = existing_entry
+            .as_ref()
+            .map(Entry::comment_lines)
+            .unwrap_or_default();
+        let new_entry = Entry::try_build(&actual_key, value, &post_colon_ws, &indent, comments)?;
 
         // Check if the field already exists and replace it (case-insensitive)
         for entry in self.entries() {
@@ -2162,7 +2166,11 @@ impl Paragraph {
 
         // Force the indentation pattern
         let indent = indent_pattern.to_string(&actual_key);
-        let new_entry = Entry::try_with_formatting(&actual_key, value, &post_colon_ws, &indent)?;
+        let comments = existing_entry
+            .as_ref()
+            .map(Entry::comment_lines)
+            .unwrap_or_default();
+        let new_entry = Entry::try_build(&actual_key, value, &post_colon_ws, &indent, comments)?;
 
         // Check if the field already exists and replace it (case-insensitive)
         for entry in self.entries() {
@@ -2581,11 +2589,42 @@ impl Entry {
         post_colon_ws: &str,
         indent: &str,
     ) -> Result<Entry, Error> {
+        Self::try_build(key, value, post_colon_ws, indent, Vec::new())
+    }
+
+    /// Lines of `value` that match one of `comments` are written as comment lines.
+    fn try_build(
+        key: &str,
+        value: &str,
+        post_colon_ws: &str,
+        indent: &str,
+        mut comments: Vec<String>,
+    ) -> Result<Entry, Error> {
         let mut builder = GreenNodeBuilder::new();
 
         builder.start_node(ENTRY.into());
         builder.token(KEY.into(), key);
         builder.token(COLON.into(), ":");
+
+        let is_comment: Vec<bool> = value
+            .split('\n')
+            .map(|line| match comments.iter().position(|c| c == line) {
+                Some(i) => {
+                    comments.remove(i);
+                    true
+                }
+                None => false,
+            })
+            .collect();
+
+        // A comment line cannot follow the colon, and a value cannot start a line
+        let post_colon_ws = if is_comment[0] {
+            "\n".to_string()
+        } else if post_colon_ws.ends_with('\n') {
+            format!("{post_colon_ws}{indent}")
+        } else {
+            post_colon_ws.to_string()
+        };
 
         // Add the post-colon whitespace token by token
         let mut i = 0;
@@ -2604,6 +2643,11 @@ impl Entry {
         }
 
         for (line_idx, line) in value.split('\n').enumerate() {
+            if is_comment[line_idx] {
+                builder.token(COMMENT.into(), line);
+                builder.token(NEWLINE.into(), "\n");
+                continue;
+            }
             if line_idx > 0 {
                 // Validate that continuation lines are not empty or whitespace-only
                 // According to Debian Policy, continuation lines must have content
@@ -2799,6 +2843,15 @@ impl Entry {
                 result
             }
         }
+    }
+
+    fn comment_lines(&self) -> Vec<String> {
+        self.0
+            .children_with_tokens()
+            .filter_map(|it| it.into_token())
+            .filter(|it| it.kind() == COMMENT)
+            .map(|it| it.text().to_string())
+            .collect()
     }
 
     /// Returns the indentation string used for continuation lines in this entry.
@@ -5869,6 +5922,22 @@ Standards-Version: 4.7.0
     assert_eq!(para.get("Standards-Version").as_deref(), Some("4.7.0"));
     // Round-trip
     assert_eq!(deb822.to_string(), text);
+    // set() keeps the comment lines the field already has
+    let mut para = para;
+    let value = para.get_with_comments("Build-Depends").unwrap();
+    para.set("Build-Depends", &value);
+    assert_eq!(deb822.to_string(), text);
+    para.set("Build-Depends", &value.replace("libsvn-dev,\n", ""));
+    assert_eq!(
+        deb822.to_string(),
+        text.replace("               libsvn-dev,\n", "")
+    );
+    // Other lines starting with # are part of the value
+    para.set("Build-Depends", "dh-python,\n# python3-all-dbg");
+    assert_eq!(
+        deb822.to_string(),
+        "Build-Depends: dh-python,\n               # python3-all-dbg\nStandards-Version: 4.7.0\n"
+    );
 }
 
 #[test]
