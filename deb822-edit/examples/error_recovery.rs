@@ -1,9 +1,9 @@
-//! Example demonstrating error recovery in the deb822-lossless parser.
+//! Example demonstrating error recovery in the deb822-edit parser.
 //!
 //! This example shows how the parser can handle malformed deb822 files gracefully,
 //! continuing to parse valid content even when errors are encountered.
 
-use deb822_lossless::Deb822;
+use deb822_edit::Deb822;
 use std::collections::HashMap;
 
 fn main() {

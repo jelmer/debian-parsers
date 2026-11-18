@@ -21,7 +21,7 @@ assert_eq!(patch_header.vendor_bugs("Debian").collect::<Vec<_>>(), vec!["https:/
 
 ## Features
 
-* `lossless` (default): round-trip preserving parser built on `deb822-lossless`.
+* `lossless` (default): round-trip preserving parser built on `deb822-edit`.
 * `patchkit`: parse the unified diff body of a `debian/patches/*` file into
   [`patchkit`](https://crates.io/crates/patchkit) structures alongside its DEP-3
   header, via the `dep3::patchkit` module.

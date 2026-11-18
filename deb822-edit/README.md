@@ -4,14 +4,14 @@ Lossless parser for deb822 style files
 # Example
 
 ```rust
-use deb822_lossless::Deb822;
+use deb822_edit::Deb822;
 use std::str::FromStr;
 
-let input = r#"Package: deb822-lossless
+let input = r#"Package: deb822-edit
 Maintainer: Jelmer Vernooĳ <jelmer@debian.org>
 Section: rust
 
-Package: deb822-lossless
+Package: deb822-edit
 Architecture: any
 Description: Lossless parser for deb822 style files.
   This parser can be used to parse files in the deb822 format, while preserving

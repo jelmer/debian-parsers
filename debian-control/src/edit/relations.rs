@@ -2,7 +2,7 @@
 //!
 //! # Example
 //! ```
-//! use debian_control::lossless::relations::{Relations, Relation};
+//! use debian_control::edit::relations::{Relations, Relation};
 //! use debian_control::relations::VersionConstraint;
 //!
 //! let mut relations: Relations = r"python3-dulwich (>= 0.19.0), python3-requests, python3-urllib3 (<< 1.26.0)".parse().unwrap();
@@ -1107,7 +1107,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
     /// relations.ensure_minimum_version("debhelper", &"12".parse().unwrap());
@@ -1208,7 +1208,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let mut relations: Relations = "debhelper (>= 9)".parse().unwrap();
     /// relations.ensure_exact_version("debhelper", &"12".parse().unwrap());
@@ -1274,7 +1274,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let mut relations: Relations = "python3".parse().unwrap();
     /// relations.ensure_some_version("debhelper");
@@ -1316,7 +1316,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relations, Entry};
+    /// use debian_control::edit::relations::{Relations, Entry};
     ///
     /// let mut relations: Relations = "python3".parse().unwrap();
     /// let new_entry: Entry = "debhelper (>= 12)".parse().unwrap();
@@ -1379,7 +1379,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let mut relations: Relations = "python3".parse().unwrap();
     /// relations.ensure_substvar("${misc:Depends}").unwrap();
@@ -1443,7 +1443,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let (mut relations, _) = Relations::parse_relaxed("python3, ${misc:Depends}", true);
     /// relations.drop_substvar("${misc:Depends}");
@@ -1516,7 +1516,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
     /// relations.filter_entries(|entry| {
@@ -1547,7 +1547,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relations, WrapAndSortOrder};
+    /// use debian_control::edit::relations::{Relations, WrapAndSortOrder};
     ///
     /// let relations: Relations = "debhelper, python3, rustc".parse().unwrap();
     /// assert!(relations.is_sorted(&WrapAndSortOrder));
@@ -1671,7 +1671,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let mut relations: Relations = "python3, debhelper, rustc".parse().unwrap();
     /// assert!(relations.drop_dependency("debhelper"));
@@ -1716,7 +1716,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relations, Relation, Entry};
+    /// use debian_control::edit::relations::{Relations, Relation, Entry};
     ///
     /// let mut relations: Relations = "python3, rustc".parse().unwrap();
     /// let entry = Entry::from(Relation::simple("debhelper"));
@@ -1744,7 +1744,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let relations: Relations = "python3, debhelper (>= 12), rustc".parse().unwrap();
     /// let (idx, entry) = relations.get_relation("debhelper").unwrap();
@@ -1777,7 +1777,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let relations: Relations = "python3 | python3-minimal, python3-dev".parse().unwrap();
     /// let entries: Vec<_> = relations.iter_relations_for("python3").collect();
@@ -1801,7 +1801,7 @@ impl Relations {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relations;
+    /// use debian_control::edit::relations::Relations;
     ///
     /// let relations: Relations = "python3, debhelper, rustc".parse().unwrap();
     /// assert!(relations.has_relation("debhelper"));
@@ -1978,7 +1978,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let mut entry: Entry = r"python3-dulwich (>= 0.19.0) | python3-requests".parse().unwrap();
     /// entry.remove_relation(1);
     /// assert_eq!(entry.to_string(), "python3-dulwich (>= 0.19.0)");
@@ -1996,7 +1996,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let entry = Entry::from(vec!["samba (>= 2.0)".parse::<Relation>().unwrap()]);
     /// assert!(entry.satisfied_by(|name: &str| -> Option<debversion::Version> {
     ///    match name {
@@ -2036,7 +2036,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relations,Entry};
+    /// use debian_control::edit::relations::{Relations,Entry};
     /// let mut relations: Relations = r"python3-dulwich (>= 0.19.0), python3-urllib3 (<< 1.26.0)".parse().unwrap();
     /// let mut entry = relations.get_entry(0).unwrap();
     /// entry.remove();
@@ -2100,7 +2100,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let mut entry: Entry = "samba (>= 2.0)".parse().unwrap();
     /// entry.push("python3-requests".parse().unwrap());
     /// assert_eq!(entry.to_string(), "samba (>= 2.0) | python3-requests");
@@ -2180,7 +2180,7 @@ impl Entry {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Entry;
+    /// use debian_control::edit::relations::Entry;
     ///
     /// let inner: Entry = "pkg (>= 1.0)".parse().unwrap();
     /// let outer: Entry = "pkg (>= 1.5) | libc6".parse().unwrap();
@@ -2339,7 +2339,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::VersionConstraint;
     /// let relation = Relation::new("samba", Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())));
     /// assert_eq!(relation.to_string(), "samba (>= 2.0)");
@@ -2383,7 +2383,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = "  samba  (  >= 2.0) ".parse::<Relation>().unwrap();
     /// assert_eq!(relation.wrap_and_sort().to_string(), "samba (>= 2.0)");
     /// ```
@@ -2439,7 +2439,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = Relation::simple("samba");
     /// assert_eq!(relation.to_string(), "samba");
     /// ```
@@ -2451,7 +2451,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::VersionConstraint;
     /// let mut relation = Relation::new("samba", Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())));
     /// relation.drop_constraint();
@@ -2482,7 +2482,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = Relation::simple("samba");
     /// assert_eq!(relation.try_name(), Some("samba".to_string()));
     /// ```
@@ -2498,7 +2498,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation: Relation = "samba (>= 4.0)".parse().unwrap();
     /// let range = relation.name_range().unwrap();
     /// assert_eq!(&relation.to_string()[range], "samba");
@@ -2507,7 +2507,7 @@ impl Relation {
         self.name_token().map(|token| token.text_range())
     }
 
-    fn name_token(&self) -> Option<crate::lossless::relations::SyntaxToken> {
+    fn name_token(&self) -> Option<crate::edit::relations::SyntaxToken> {
         self.0.children_with_tokens().find_map(|it| match it {
             SyntaxElement::Token(token) if token.kind() == IDENT => Some(token),
             _ => None,
@@ -2522,7 +2522,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation = Relation::simple("samba");
     /// assert_eq!(relation.name(), "samba");
     /// ```
@@ -2538,7 +2538,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation: Relation = "samba:any".parse().unwrap();
     /// assert_eq!(relation.archqual(), Some("any".to_string()));
     /// ```
@@ -2559,7 +2559,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let mut relation = Relation::simple("samba");
     /// relation.set_archqual("any");
     /// assert_eq!(relation.to_string(), "samba:any");
@@ -2677,7 +2677,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::VersionConstraint;
     /// let mut relation = Relation::simple("samba");
     /// relation.set_version(Some((VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())));
@@ -2847,7 +2847,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation: Relation = "samba [amd64]".parse().unwrap();
     /// assert_eq!(relation.architectures().unwrap().collect::<Vec<_>>(), vec!["amd64".to_string()]);
     /// let relation: Relation = "samba [!amd64]".parse().unwrap();
@@ -2886,7 +2886,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation};
+    /// use debian_control::edit::relations::{Relation};
     /// use debian_control::relations::{BuildProfile};
     /// let relation: Relation = "samba <!nocheck>".parse().unwrap();
     /// assert_eq!(relation.profiles().collect::<Vec<_>>(), vec![vec![BuildProfile::Disabled("nocheck".to_string())]]);
@@ -2928,7 +2928,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let relation: Relation = "samba <!nocheck>".parse().unwrap();
     /// let ranges: Vec<_> = relation.profile_ranges().collect();
     /// assert_eq!(ranges.len(), 1);
@@ -2953,7 +2953,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::{Relation,Entry};
+    /// use debian_control::edit::relations::{Relation,Entry};
     /// let mut entry: Entry = r"python3-dulwich (>= 0.19.0) | python3-urllib3 (<< 1.26.0)".parse().unwrap();
     /// let mut relation = entry.get_relation(0).unwrap();
     /// relation.remove();
@@ -3025,7 +3025,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// let mut relation = Relation::simple("samba");
     /// relation.set_architectures(vec!["amd64", "i386"].into_iter());
     /// assert_eq!(relation.to_string(), "samba [amd64 i386]");
@@ -3074,7 +3074,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// use debian_control::relations::BuildProfile;
     /// let mut relation = Relation::simple("samba");
     /// relation.add_profile(&[BuildProfile::Disabled("nocheck".to_string())]);
@@ -3153,7 +3153,7 @@ impl Relation {
     ///
     /// # Example
     /// ```
-    /// use debian_control::lossless::relations::Relation;
+    /// use debian_control::edit::relations::Relation;
     /// use debian_control::relations::VersionConstraint;
     ///
     /// let inner = Relation::new("pkg", Some((VersionConstraint::GreaterThanEqual, "1.0".parse().unwrap())));
@@ -3232,7 +3232,7 @@ impl Relation {
 ///
 /// # Example
 /// ```
-/// use debian_control::lossless::relations::{Relation};
+/// use debian_control::edit::relations::{Relation};
 /// use debian_control::relations::VersionConstraint;
 /// let relation = Relation::build("samba")
 ///    .version_constraint(VersionConstraint::GreaterThanEqual, "2.0".parse().unwrap())
@@ -4442,7 +4442,7 @@ mod tests {
     #[test]
     fn test_ensure_minimum_version_preserves_newline_in_control() {
         // Test the full scenario from the bug report
-        use crate::lossless::Control;
+        use crate::edit::Control;
         use std::str::FromStr;
 
         let input = r#"Source: f2fs-tools

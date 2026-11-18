@@ -1,6 +1,6 @@
 #![no_main]
 
-use deb822_lossless::Deb822;
+use deb822_edit::Deb822;
 use libfuzzer_sys::fuzz_target;
 use std::str::FromStr;
 
