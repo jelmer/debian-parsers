@@ -1154,105 +1154,83 @@ impl Deb822 {
             return;
         }
 
-        // Get the paragraph count to validate indices
-        let paragraph_count = self.paragraphs().count();
-        if from_index >= paragraph_count || to_index >= paragraph_count {
+        let mut children: Vec<SyntaxElement> = self.0.children_with_tokens().collect();
+        let paragraph_positions = |children: &[SyntaxElement]| -> Vec<usize> {
+            children
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.kind() == PARAGRAPH)
+                .map(|(i, _)| i)
+                .collect()
+        };
+        let is_comment_line = |e: &SyntaxElement| {
+            e.as_node().is_some_and(|n| {
+                n.kind() == EMPTY_LINE && n.children_with_tokens().any(|t| t.kind() == COMMENT)
+            })
+        };
+        let is_blank_line = |e: &SyntaxElement| e.kind() == EMPTY_LINE && !is_comment_line(e);
+        // The comment lines directly above a paragraph belong to it
+        let block_start = |children: &[SyntaxElement], mut i: usize| {
+            while i > 0 && is_comment_line(&children[i - 1]) {
+                i -= 1;
+            }
+            i
+        };
+
+        let positions = paragraph_positions(&children);
+        if from_index >= positions.len() || to_index >= positions.len() {
             return;
         }
 
-        // Clone the paragraph node we want to move
-        let paragraph_to_move = self.paragraphs().nth(from_index).unwrap().0.clone();
-
-        // Remove the paragraph from its original position
-        let from_physical = self.convert_index(from_index).unwrap();
-
-        // Determine the range to remove (paragraph and possibly preceding EMPTY_LINE)
-        let mut start_idx = from_physical;
-        if from_physical > 0 {
-            if let Some(prev_node) = self.0.children_with_tokens().nth(from_physical - 1) {
-                if prev_node.kind() == EMPTY_LINE {
-                    start_idx = from_physical - 1;
-                }
+        // Take out the paragraph with its comment lines, and the blank lines
+        // before it, or for the first paragraph the blank lines after it
+        let from_physical = positions[from_index];
+        let start = block_start(&children, from_physical);
+        let block: Vec<_> = children.drain(start..=from_physical).collect();
+        let mut gap_start = start;
+        let mut gap_end = start;
+        if from_index == 0 {
+            while gap_end < children.len() && is_blank_line(&children[gap_end]) {
+                gap_end += 1;
+            }
+        } else {
+            while gap_start > 0 && is_blank_line(&children[gap_start - 1]) {
+                gap_start -= 1;
             }
         }
+        for removed in children.drain(gap_start..gap_end) {
+            removed.detach();
+        }
 
-        // Remove the paragraph and any preceding EMPTY_LINE
-        self.0.splice_children(start_idx..from_physical + 1, []);
-        self.delete_trailing_space(start_idx);
-
-        // Calculate the physical insertion point
-        // After removal, we need to determine where to insert
-        // The semantics are: the moved paragraph ends up at logical index to_index in the final result
+        // The moved paragraph ends up at index to_index: moving forward, it goes
+        // after the paragraph now at to_index - 1, moving backward, above the
+        // comment lines of the paragraph now at to_index
+        let positions = paragraph_positions(&children);
         let insert_at = if to_index > from_index {
-            // Moving forward: after removal, to_index-1 paragraphs should be before the moved one
-            // So we insert after paragraph at index (to_index - 1)
-            let target_idx = to_index - 1;
-            if let Some(target_physical) = self.convert_index(target_idx) {
-                target_physical + 1
-            } else {
-                // If convert_index returns None, insert at the end
-                self.0.children().count()
-            }
+            positions[to_index - 1] + 1
         } else {
-            // Moving backward: after removal, to_index paragraphs should be before the moved one
-            // So we insert at paragraph index to_index
-            if let Some(target_physical) = self.convert_index(to_index) {
-                target_physical
-            } else {
-                self.0.children().count()
-            }
+            block_start(&children, positions[to_index])
         };
 
-        // Build the nodes to insert
+        let empty_line = || -> SyntaxElement {
+            let mut builder = GreenNodeBuilder::new();
+            builder.start_node(EMPTY_LINE.into());
+            builder.token(NEWLINE.into(), "\n");
+            builder.finish_node();
+            SyntaxNode::new_root_mut(builder.finish()).into()
+        };
         let mut to_insert = vec![];
-
-        // Determine if we need to add an EMPTY_LINE before the paragraph
-        let needs_empty_line_before = if insert_at == 0 {
-            // At the beginning - no empty line before
-            false
-        } else if insert_at > 0 {
-            // Check if there's already an EMPTY_LINE at the insertion point
-            if let Some(node_at_insert) = self.0.children_with_tokens().nth(insert_at - 1) {
-                node_at_insert.kind() != EMPTY_LINE
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if needs_empty_line_before {
-            let mut builder = GreenNodeBuilder::new();
-            builder.start_node(EMPTY_LINE.into());
-            builder.token(NEWLINE.into(), "\n");
-            builder.finish_node();
-            to_insert.push(SyntaxNode::new_root_mut(builder.finish()).into());
+        if insert_at > 0 && !is_blank_line(&children[insert_at - 1]) {
+            to_insert.push(empty_line());
         }
-
-        to_insert.push(paragraph_to_move.into());
-
-        // Determine if we need to add an EMPTY_LINE after the paragraph
-        let needs_empty_line_after = if insert_at < self.0.children().count() {
-            // There are nodes after - check if next node is EMPTY_LINE
-            if let Some(node_after) = self.0.children_with_tokens().nth(insert_at) {
-                node_after.kind() != EMPTY_LINE
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        if needs_empty_line_after {
-            let mut builder = GreenNodeBuilder::new();
-            builder.start_node(EMPTY_LINE.into());
-            builder.token(NEWLINE.into(), "\n");
-            builder.finish_node();
-            to_insert.push(SyntaxNode::new_root_mut(builder.finish()).into());
+        to_insert.extend(block);
+        if insert_at < children.len() && !is_blank_line(&children[insert_at]) {
+            to_insert.push(empty_line());
         }
+        children.splice(insert_at..insert_at, to_insert);
 
-        // Insert at the new position
-        self.0.splice_children(insert_at..insert_at, to_insert);
+        let num_children = self.0.children_with_tokens().count();
+        self.0.splice_children(0..num_children, children);
     }
 
     /// Add a new empty paragraph to the end of the file.
@@ -4922,6 +4900,22 @@ fn test_move_paragraph_middle() {
         d.to_string(),
         "Foo: Bar\nBaz: Qux\n\nX: Y\nZ: W\n\nA: B\nC: D\n"
     );
+}
+
+#[test]
+fn test_move_paragraph_with_comments_above() {
+    let text = "# foo\nFoo: Bar\n\n# a\nA: B\n\n# x\nX: Y\n";
+    let mut d: Deb822 = text.parse().unwrap();
+    d.move_paragraph(1, 0);
+    assert_eq!(d.to_string(), "# a\nA: B\n\n# foo\nFoo: Bar\n\n# x\nX: Y\n");
+
+    let mut d: Deb822 = text.parse().unwrap();
+    d.move_paragraph(1, 2);
+    assert_eq!(d.to_string(), "# foo\nFoo: Bar\n\n# x\nX: Y\n\n# a\nA: B\n");
+
+    let mut d: Deb822 = text.parse().unwrap();
+    d.move_paragraph(0, 1);
+    assert_eq!(d.to_string(), "# a\nA: B\n\n# foo\nFoo: Bar\n\n# x\nX: Y\n");
 }
 
 #[test]
