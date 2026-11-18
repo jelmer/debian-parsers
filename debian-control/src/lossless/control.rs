@@ -1961,6 +1961,25 @@ Architecture: amd64
         let mut binary = control.add_binary("foo");
         let relations: Relations = "bar (>= 1.0.0)".parse().unwrap();
         binary.set_depends(Some(&relations));
+
+        let control: Control =
+            "Package: foo\nDepends: libc6,\n# Terminal first\n xterm,\n openbox,\n xterm\n"
+                .parse()
+                .unwrap();
+        let mut binary = control.binaries().next().unwrap();
+        let mut depends = binary.depends().unwrap();
+        depends.remove_entry(3);
+        binary.set_depends(Some(&depends));
+        assert_eq!(
+            control.to_string(),
+            "Package: foo\nDepends: libc6,\n# Terminal first\n xterm,\n openbox\n"
+        );
+        depends.remove_entry(0);
+        binary.set_depends(Some(&depends));
+        assert_eq!(
+            control.to_string(),
+            "Package: foo\nDepends:\n# Terminal first\n xterm,\n openbox\n"
+        );
     }
 
     #[test]
