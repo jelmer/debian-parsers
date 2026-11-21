@@ -2048,7 +2048,7 @@ impl Entry {
             .0
             .siblings(Direction::Prev)
             .skip(1)
-            .any(|n| n.kind() == ENTRY);
+            .any(|n| n.kind() == ENTRY || n.kind() == SUBSTVAR);
         while let Some(n) = self.0.next_sibling_or_token() {
             if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
                 n.detach();
@@ -2060,20 +2060,58 @@ impl Entry {
                 panic!("Unexpected node: {:?}", n);
             }
         }
-        if !is_first {
-            while let Some(n) = self.0.prev_sibling_or_token() {
-                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
-                    n.detach();
-                } else if !removed_comma && n.kind() == COMMA {
-                    n.detach();
-                    break;
-                } else {
-                    break;
+        let comment_above = self
+            .0
+            .siblings_with_tokens(Direction::Prev)
+            .skip(1)
+            .take_while(|n| matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT))
+            .any(|n| n.kind() == COMMENT);
+        if !is_first && comment_above && removed_comma {
+            // The comment lines above this entry stay; drop the rest of its line instead
+            let mut own_line = false;
+            while let Some(n) = self.0.next_sibling_or_token() {
+                match n.kind() {
+                    WHITESPACE => n.detach(),
+                    NEWLINE => {
+                        n.detach();
+                        own_line = true;
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            let next = self.0.next_sibling_or_token().map(|n| n.kind());
+            let at_end = next.is_none();
+            if own_line || at_end || next == Some(COMMENT) {
+                while let Some(n) = self.0.prev_sibling_or_token() {
+                    if n.kind() == WHITESPACE || (at_end && n.kind() == NEWLINE) {
+                        n.detach();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        } else if !is_first {
+            // The comment lines above this entry stay
+            let mut seen_comment = false;
+            let mut prev = self.0.prev_sibling_or_token();
+            while let Some(n) = prev {
+                prev = n.prev_sibling_or_token();
+                match n.kind() {
+                    COMMENT => seen_comment = true,
+                    WHITESPACE | NEWLINE if seen_comment => {}
+                    WHITESPACE | NEWLINE => n.detach(),
+                    COMMA if !removed_comma => {
+                        n.detach();
+                        break;
+                    }
+                    _ => break,
                 }
             }
         } else {
+            // The comment lines above the next entry stay
             while let Some(n) = self.0.next_sibling_or_token() {
-                if matches!(n.kind(), WHITESPACE | NEWLINE | COMMENT) {
+                if matches!(n.kind(), WHITESPACE | NEWLINE) {
                     n.detach();
                 } else {
                     break;
@@ -5611,6 +5649,22 @@ Description: test
             relations.entries().next().unwrap().to_string(),
             "python3-all-dev"
         );
+        assert_eq!(relations.to_string(), "#  commented-out,\npython3-all-dev");
+    }
+
+    #[test]
+    fn test_remove_entry_after_substvar() {
+        let (mut relations, _) = Relations::parse_relaxed("${misc:Depends}, libc6", true);
+        relations.remove_entry(0);
+        assert_eq!(relations.to_string(), "${misc:Depends}");
+
+        let input = "${misc:Depends}, libc6,\n# Terminal first\nxterm";
+        let (mut relations, _) = Relations::parse_relaxed(input, true);
+        relations.remove_entry(0);
+        assert_eq!(
+            relations.to_string(),
+            "${misc:Depends},\n# Terminal first\nxterm"
+        );
     }
 
     #[test]
@@ -5634,6 +5688,25 @@ Description: test
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].to_string(), "dh-python");
         assert_eq!(entries[1].to_string(), "libfoo-dev");
+        assert_eq!(
+            relations.to_string(),
+            "dh-python,\n#  commented-out,\nlibfoo-dev"
+        );
+        assert!(relations.drop_dependency("libfoo-dev"));
+        assert_eq!(relations.to_string(), "dh-python\n#  commented-out,");
+
+        let input = "dh-python,\n#  commented-out,\n python3-all-dev, libfoo-dev";
+        let mut relations: Relations = input.parse().unwrap();
+        assert!(relations.drop_dependency("python3-all-dev"));
+        assert_eq!(
+            relations.to_string(),
+            "dh-python,\n#  commented-out,\n libfoo-dev"
+        );
+
+        let input = "dh-python,\n#  commented-out,\n python3-all-dev,";
+        let mut relations: Relations = input.parse().unwrap();
+        assert!(relations.drop_dependency("python3-all-dev"));
+        assert_eq!(relations.to_string(), "dh-python,\n#  commented-out,");
     }
 
     #[test]
