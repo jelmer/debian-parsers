@@ -28,15 +28,15 @@ deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = [
 ] }
 url = { version = "2.5.4", features = ["serde"] }
 tracing = { version = "0.1", optional = true }
-sequoia-net = { version = ">=0.30,<0.32", default-features = false, optional = true }
-tokio = { version = "1", features = ["rt", "macros"], optional = true }
+sequoia-net = { version = ">=0.30,<0.32", optional = true }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"], optional = true }
 sequoia-openpgp = { version = "2.0", default-features = false, features = [
 	"compression-deflate",
 	"crypto-nettle",
 ], optional = true }
 regex = { version = "1.11.1", optional = true }
 itertools = { version = ">=0.14.0,<0.16.0" }
-launchpadlib = { version = "0.5.5", optional = true, default-features = false, features = [
+launchpadlib = { version = "0.5.8", optional = true, default-features = false, features = [
 	"blocking",
 	"api-v1_0",
 	"packages",

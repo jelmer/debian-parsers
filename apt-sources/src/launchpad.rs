@@ -350,10 +350,10 @@ pub fn download_ppa_signing_key(
 
     let ppa = get_ppa(&client, &ppa_info.user, &ppa_info.name)?;
 
-    let fingerprint = ppa.signing_key_fingerprint;
-    if fingerprint.is_empty() {
-        return Err(Error::NoSigningKey);
-    }
+    let fingerprint = ppa
+        .signing_key_fingerprint
+        .filter(|fp| !fp.is_empty())
+        .ok_or(Error::NoSigningKey)?;
 
     // Download the key data from the keyserver
     // The key is available at: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x{fingerprint}
