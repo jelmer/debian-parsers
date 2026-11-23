@@ -28,7 +28,7 @@ deb822-fast = { version = ">=0.1, <0.3", path = "../deb822-fast", features = [
 ] }
 url = { version = "2.5.4", features = ["serde"] }
 tracing = { version = "0.1", optional = true }
-sequoia-net = { version = "0.30", default-features = false, optional = true }
+sequoia-net = { version = ">=0.30,<0.32", default-features = false, optional = true }
 tokio = { version = "1", features = ["rt", "macros"], optional = true }
 sequoia-openpgp = { version = "2.0", default-features = false, features = [
 	"compression-deflate",
